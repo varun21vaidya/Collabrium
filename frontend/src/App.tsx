@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as Sentry from '@sentry/react';
 import Editor from './components/Editor';
 import DocumentList from './components/DocumentList';
 
@@ -168,4 +169,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+export default Sentry.withProfiler(App);
