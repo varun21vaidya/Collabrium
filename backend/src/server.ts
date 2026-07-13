@@ -3,26 +3,44 @@ import express, { Request, Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import cors from 'cors';
+import helmet from 'helmet';
 import mongoose from 'mongoose';
 import { IncomingMessage } from 'http';
 import rateLimit from 'express-rate-limit';
 import { handleRelayConnection, flushAllDocuments, getActiveDocCount, getTotalConnections } from './relay/wsRelayServer.js';
 import { verifyWsToken, signToken } from './middleware/auth.js';
+import DocumentModel from './models/Document.js';
 import documentsRouter from './routes/documents.js';
 
 const logger = {
   info: (msg: string, meta?: Record<string, unknown>) => console.log(`[INFO] ${msg}`, meta || ''),
+  warn: (msg: string, meta?: Record<string, unknown>) => console.warn(`[WARN] ${msg}`, meta || ''),
   error: (msg: string, meta?: Record<string, unknown>) => console.error(`[ERROR] ${msg}`, meta || ''),
 };
 
 const app = express();
 const server = createServer(app);
 
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      connectSrc: ["'self'", process.env.FRONTEND_URL || 'http://localhost:5173'],
+    },
+  },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
 });
 
 const tokenLimiter = rateLimit({
@@ -31,6 +49,12 @@ const tokenLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many token requests, please try again later' },
+});
+
+app.use('/api/', apiLimiter);
+
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 app.post('/api/auth/demo-token', tokenLimiter, (req: Request, res: Response) => {
@@ -53,9 +77,22 @@ app.get('/health/ws', (_req: Request, res: Response) => {
 
 app.use('/api/documents', documentsRouter);
 
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
 
-server.on('upgrade', (request: IncomingMessage, socket, head) => {
+async function checkDocumentAccess(documentId: string, userId: string): Promise<boolean> {
+  try {
+    const doc = await DocumentModel.findById(documentId)
+      .select('ownerId collaboratorIds')
+      .lean();
+    if (!doc) return false;
+    return doc.ownerId === userId || doc.collaboratorIds.includes(userId);
+  } catch (err) {
+    logger.error('ACL check failed', { documentId, userId, error: (err as Error).message });
+    return false;
+  }
+}
+
+server.on('upgrade', async (request: IncomingMessage, socket, head) => {
   const url = new URL(request.url || '/', `http://${request.headers.host}`);
 
   if (url.pathname !== '/collab') {
@@ -79,6 +116,14 @@ server.on('upgrade', (request: IncomingMessage, socket, head) => {
     return;
   }
 
+  const hasAccess = await checkDocumentAccess(documentId, claims.sub);
+  if (!hasAccess) {
+    logger.warn('Access denied to document', { documentId, userId: claims.sub });
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
   wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
     wss.emit('connection', ws, request, documentId, claims.sub);
   });
@@ -91,7 +136,13 @@ wss.on('connection', (ws: WebSocket, _req: IncomingMessage, documentId: string, 
 async function start(): Promise<void> {
   try {
     const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/collab-editor';
-    await mongoose.connect(mongoUri);
+    await mongoose.connect(mongoUri, {
+      maxPoolSize: 50,
+      minPoolSize: 10,
+      maxIdleTimeMS: 60_000,
+      connectTimeoutMS: 10_000,
+      socketTimeoutMS: 45_000,
+    });
     logger.info('MongoDB connected');
 
     const PORT = parseInt(process.env.PORT || '3002', 10);
@@ -106,14 +157,37 @@ async function start(): Promise<void> {
 
 start();
 
-const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT'];
-signals.forEach((signal) => {
-  process.on(signal, async () => {
-    logger.info(`Received ${signal}, flushing all documents...`);
-    await flushAllDocuments();
-    server.close();
-    await mongoose.disconnect();
-    logger.info('Graceful shutdown complete');
-    process.exit(0);
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`Received ${signal}, starting graceful shutdown...`);
+
+  server.close(() => {
+    logger.info('HTTP server closed');
   });
-});
+
+  await flushAllDocuments();
+
+  try {
+    await mongoose.disconnect();
+    logger.info('MongoDB disconnected');
+  } catch (err) {
+    logger.error('MongoDB disconnect failed', { error: (err as Error).message });
+  }
+
+  logger.info('Graceful shutdown complete');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+setTimeout(() => {
+  if (isShuttingDown) {
+    logger.error('Graceful shutdown timed out, forcing exit');
+    process.exit(1);
+  }
+}, 30_000).unref();

@@ -7,6 +7,7 @@ import { useYjsDocument } from '../hooks/useYjsDocument';
 import PresenceBar from './PresenceBar';
 import ConnectionStatus from './ConnectionStatus';
 import ErrorBoundary from './ErrorBoundary';
+import Toolbar from './Toolbar';
 import { getUserColor } from '../lib/userColor';
 
 interface EditorProps {
@@ -70,10 +71,13 @@ const Editor: React.FC<EditorProps> = ({ documentId, token, userName, userId }) 
           <ConnectionStatus status={status} />
         </div>
       </div>
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <ErrorBoundary fallback={<div className="text-center py-8 text-red-500">Editor failed to load. Please refresh the page.</div>}>
-          <EditorContent editor={editor} />
-        </ErrorBoundary>
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <Toolbar editor={editor} />
+        <div className="p-6">
+          <ErrorBoundary fallback={<div className="text-center py-8 text-red-500">Editor failed to load. Please refresh the page.</div>}>
+            <EditorContent editor={editor} />
+          </ErrorBoundary>
+        </div>
       </div>
       <style>{`
         .collaboration-cursor__caret {
