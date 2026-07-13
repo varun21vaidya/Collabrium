@@ -7,16 +7,13 @@ import helmet from 'helmet';
 import mongoose from 'mongoose';
 import { IncomingMessage } from 'http';
 import rateLimit from 'express-rate-limit';
+import pinoHttp from 'pino-http';
 import { handleRelayConnection, flushAllDocuments, getActiveDocCount, getTotalConnections } from './relay/wsRelayServer.js';
 import { verifyWsToken, signToken } from './middleware/auth.js';
 import DocumentModel from './models/Document.js';
 import documentsRouter from './routes/documents.js';
-
-const logger = {
-  info: (msg: string, meta?: Record<string, unknown>) => console.log(`[INFO] ${msg}`, meta || ''),
-  warn: (msg: string, meta?: Record<string, unknown>) => console.warn(`[WARN] ${msg}`, meta || ''),
-  error: (msg: string, meta?: Record<string, unknown>) => console.error(`[ERROR] ${msg}`, meta || ''),
-};
+import { logger } from './logger.js';
+import { register, httpRequestsTotal, wsConnectionsActive, activeDocumentsGauge } from './metrics.js';
 
 const app = express();
 const server = createServer(app);
@@ -53,8 +50,22 @@ const tokenLimiter = rateLimit({
 
 app.use('/api/', apiLimiter);
 
+app.use(pinoHttp({ logger }));
+
+app.use((req: Request, res: Response, next) => {
+  res.on('finish', () => {
+    httpRequestsTotal.inc({ method: req.method, route: req.route?.path || req.path, status: res.statusCode });
+  });
+  next();
+});
+
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/metrics', async (_req: Request, res: Response) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
 });
 
 app.post('/api/auth/demo-token', tokenLimiter, (req: Request, res: Response) => {
