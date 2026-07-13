@@ -145,4 +145,66 @@ router.delete('/:id', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
+router.post('/:id/collaborators', authMiddleware, async (req: Request, res: Response) => {
+  const userId = (req as any).user.sub;
+  const { id } = req.params;
+  const { collaboratorId } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    res.status(400).json({ error: 'Invalid document ID' });
+    return;
+  }
+
+  if (!collaboratorId || typeof collaboratorId !== 'string') {
+    res.status(400).json({ error: 'collaboratorId is required' });
+    return;
+  }
+
+  try {
+    const doc = await DocumentModel.findOneAndUpdate(
+      { _id: id, ownerId: userId },
+      { $addToSet: { collaboratorIds: collaboratorId } },
+      { new: true }
+    ).select('title ownerId collaboratorIds');
+
+    if (!doc) {
+      res.status(404).json({ error: 'Document not found or not authorized' });
+      return;
+    }
+
+    res.json({ document: doc });
+  } catch (err) {
+    console.error('[Documents] Add collaborator failed:', (err as Error).message);
+    res.status(500).json({ error: 'Failed to add collaborator' });
+  }
+});
+
+router.delete('/:id/collaborators/:collaboratorId', authMiddleware, async (req: Request, res: Response) => {
+  const userId = (req as any).user.sub;
+  const { id, collaboratorId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    res.status(400).json({ error: 'Invalid document ID' });
+    return;
+  }
+
+  try {
+    const doc = await DocumentModel.findOneAndUpdate(
+      { _id: id, ownerId: userId },
+      { $pull: { collaboratorIds: collaboratorId } },
+      { new: true }
+    ).select('title ownerId collaboratorIds');
+
+    if (!doc) {
+      res.status(404).json({ error: 'Document not found or not authorized' });
+      return;
+    }
+
+    res.json({ document: doc });
+  } catch (err) {
+    console.error('[Documents] Remove collaborator failed:', (err as Error).message);
+    res.status(500).json({ error: 'Failed to remove collaborator' });
+  }
+});
+
 export default router;

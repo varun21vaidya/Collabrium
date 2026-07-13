@@ -32,9 +32,9 @@ const PresenceBar: React.FC = memo(({ provider }) => {
 
   return (
     <div className="flex items-center gap-2">
-      {visibleUsers.map((user, i) => (
+      {visibleUsers.map((user) => (
         <div
-          key={i}
+          key={user.name}
           className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold"
           style={{ backgroundColor: user.color }}
           title={user.name}

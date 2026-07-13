@@ -62,6 +62,25 @@ const Editor: React.FC<EditorProps> = ({ documentId, token, userName, userId }) 
     }
   }, [editor]);
 
+  if (status !== 'connected') {
+    return (
+      <div className="max-w-4xl mx-auto py-8 px-4">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-xl font-semibold text-gray-800">{documentId}</h1>
+          <ConnectionStatus status={status} />
+        </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12">
+          <div className="flex flex-col items-center justify-center gap-4">
+            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <p className="text-gray-500 text-sm">
+              {status === 'connecting' ? 'Connecting to server...' : 'Syncing document...'}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto py-8 px-4">
       <div className="flex items-center justify-between mb-6">
