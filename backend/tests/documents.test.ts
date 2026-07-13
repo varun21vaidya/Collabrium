@@ -95,4 +95,75 @@ describe('Documents API', () => {
     expect(renameRes.status).toBe(200);
     expect(renameRes.body.document.title).toBe('Renamed');
   });
+
+  it('deletes a document', async () => {
+    const createRes = await request(app)
+      .post('/api/documents')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'To Delete' });
+
+    const docId = createRes.body.document._id;
+
+    const deleteRes = await request(app)
+      .delete(`/api/documents/${docId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.success).toBe(true);
+
+    const getRes = await request(app)
+      .get(`/api/documents/${docId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(getRes.status).toBe(404);
+  });
+
+  it('adds and removes a collaborator', async () => {
+    const createRes = await request(app)
+      .post('/api/documents')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Collaboration Doc' });
+
+    const docId = createRes.body.document._id;
+    const collaboratorToken = signToken({ sub: 'user2', name: 'Bob' });
+
+    const addRes = await request(app)
+      .post(`/api/documents/${docId}/collaborators`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ collaboratorId: 'user2' });
+
+    expect(addRes.status).toBe(200);
+    expect(addRes.body.document.collaboratorIds).toContain('user2');
+
+    const collaboratorListRes = await request(app)
+      .get('/api/documents')
+      .set('Authorization', `Bearer ${collaboratorToken}`);
+
+    const found = collaboratorListRes.body.documents.some((d: any) => d._id === docId);
+    expect(found).toBe(true);
+
+    const removeRes = await request(app)
+      .delete(`/api/documents/${docId}/collaborators/user2`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(removeRes.status).toBe(200);
+    expect(removeRes.body.document.collaboratorIds).not.toContain('user2');
+  });
+
+  it('rejects collaborator add from non-owner', async () => {
+    const createRes = await request(app)
+      .post('/api/documents')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Owner Only' });
+
+    const docId = createRes.body.document._id;
+    const otherToken = signToken({ sub: 'user3', name: 'Carol' });
+
+    const addRes = await request(app)
+      .post(`/api/documents/${docId}/collaborators`)
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ collaboratorId: 'user4' });
+
+    expect(addRes.status).toBe(404);
+  });
 });

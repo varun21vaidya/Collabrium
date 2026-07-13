@@ -9,6 +9,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ editor }) => {
   if (!editor) return null;
 
   const buttons = [
+    { action: () => editor.chain().focus().undo().run(), isActive: () => false, label: 'Undo', shortcut: 'Ctrl+Z', icon: '\u21A9' },
+    { action: () => editor.chain().focus().redo().run(), isActive: () => false, label: 'Redo', shortcut: 'Ctrl+Shift+Z', icon: '\u21AA' },
+    { type: 'divider' as const },
     { action: () => editor.chain().focus().toggleBold().run(), isActive: () => editor.isActive('bold'), label: 'Bold', shortcut: 'Ctrl+B', icon: 'B' },
     { action: () => editor.chain().focus().toggleItalic().run(), isActive: () => editor.isActive('italic'), label: 'Italic', shortcut: 'Ctrl+I', icon: 'I' },
     { action: () => editor.chain().focus().toggleStrike().run(), isActive: () => editor.isActive('strike'), label: 'Strikethrough', shortcut: 'Ctrl+S', icon: 'S' },

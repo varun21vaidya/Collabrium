@@ -22,8 +22,20 @@ services:
       MONGODB_URI: mongodb://mongodb:27017/collab-editor
       JWT_SECRET: change-me-to-a-random-secret
       FRONTEND_URL: http://localhost:5173
+      LOG_LEVEL: info
     depends_on:
       - mongodb
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: collabrium-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
     restart: unless-stopped
 
 volumes:
