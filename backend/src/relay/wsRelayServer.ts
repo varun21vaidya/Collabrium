@@ -2,6 +2,8 @@ import { WebSocket } from 'ws';
 import * as Y from 'yjs';
 import { roomManager } from './roomManager.js';
 import { persistDocument, loadDocument } from '../persistence/mongoPersistence.js';
+import { logger } from '../logger.js';
+import { wsConnectionsActive, activeDocumentsGauge, persistenceOperations, persistenceDuration } from '../metrics.js';
 
 const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
@@ -11,12 +13,6 @@ const MAX_CONNECTIONS_PER_DOC = 50;
 const activeDocs: Map<string, Y.Doc> = new Map();
 const docPromises: Map<string, Promise<Y.Doc>> = new Map();
 const persistTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-
-const logger = {
-  info: (msg: string, meta?: Record<string, unknown>) => console.log(`[INFO] ${msg}`, meta || ''),
-  warn: (msg: string, meta?: Record<string, unknown>) => console.warn(`[WARN] ${msg}`, meta || ''),
-  error: (msg: string, meta?: Record<string, unknown>) => console.error(`[ERROR] ${msg}`, meta || ''),
-};
 
 async function getOrCreateDoc(documentId: string): Promise<Y.Doc> {
   if (activeDocs.has(documentId)) return activeDocs.get(documentId)!;
@@ -59,12 +55,19 @@ function decodeMessage(data: Buffer): { type: number; payload: Uint8Array } {
 }
 
 async function persistWithRetry(documentId: string, state: Uint8Array, maxRetries = 3): Promise<void> {
+  const endTimer = persistenceDuration.startTimer({ operation: 'persist' });
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       await persistDocument(documentId, state);
+      endTimer();
+      persistenceOperations.inc({ operation: 'persist', status: 'success' });
       return;
     } catch (err) {
-      if (attempt === maxRetries) throw err;
+      if (attempt === maxRetries) {
+        endTimer();
+        persistenceOperations.inc({ operation: 'persist', status: 'failed' });
+        throw err;
+      }
       const delay = 1000 * 2 ** (attempt - 1);
       logger.warn('Persistence retry', { documentId, attempt, delay, error: (err as Error).message });
       await new Promise(r => setTimeout(r, delay));
@@ -166,6 +169,9 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
       const fullState = Y.encodeStateAsUpdate(ydoc);
       ws.send(encodeMessage(MESSAGE_SYNC, fullState));
 
+      wsConnectionsActive.set(roomManager.getRoomSize(documentId));
+      activeDocumentsGauge.set(activeDocs.size);
+
       logger.info('Client joined document', {
         documentId,
         userId,
@@ -218,6 +224,8 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
       roomManager.leave(documentId, ws);
       const remaining = roomManager.getRoomSize(documentId);
 
+      wsConnectionsActive.set(remaining);
+
       logger.info('Client left document', { documentId, userId, remaining });
 
       if (remaining === 0) {
@@ -240,6 +248,7 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
 
         ydoc.destroy();
         activeDocs.delete(documentId);
+        activeDocumentsGauge.set(activeDocs.size);
         logger.info('Purged Y.Doc from memory', { documentId });
       }
     }
