@@ -5,7 +5,8 @@ import { createServer } from 'http';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import { IncomingMessage } from 'http';
-import { handleRelayConnection } from './relay/wsRelayServer.js';
+import rateLimit from 'express-rate-limit';
+import { handleRelayConnection, flushAllDocuments, getActiveDocCount, getTotalConnections } from './relay/wsRelayServer.js';
 import { verifyWsToken, signToken } from './middleware/auth.js';
 import documentsRouter from './routes/documents.js';
 
@@ -24,7 +25,15 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.post('/api/auth/demo-token', (req: Request, res: Response) => {
+const tokenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many token requests, please try again later' },
+});
+
+app.post('/api/auth/demo-token', tokenLimiter, (req: Request, res: Response) => {
   const { userId, name } = req.body;
   if (!userId || !name) {
     res.status(400).json({ error: 'userId and name required' });
@@ -32,6 +41,14 @@ app.post('/api/auth/demo-token', (req: Request, res: Response) => {
   }
   const token = signToken({ sub: userId, name });
   res.json({ token, userId, name });
+});
+
+app.get('/health/ws', (_req: Request, res: Response) => {
+  res.json({
+    activeDocuments: getActiveDocCount(),
+    totalConnections: getTotalConnections(),
+    uptime: process.uptime(),
+  });
 });
 
 app.use('/api/documents', documentsRouter);
@@ -88,3 +105,15 @@ async function start(): Promise<void> {
 }
 
 start();
+
+const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGINT'];
+signals.forEach((signal) => {
+  process.on(signal, async () => {
+    logger.info(`Received ${signal}, flushing all documents...`);
+    await flushAllDocuments();
+    server.close();
+    await mongoose.disconnect();
+    logger.info('Graceful shutdown complete');
+    process.exit(0);
+  });
+});

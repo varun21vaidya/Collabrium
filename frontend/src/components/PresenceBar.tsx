@@ -23,6 +23,7 @@ const PresenceBar: React.FC = memo(({ provider }) => {
 
     return () => {
       provider.awareness.off('change', updateUsers);
+      setUsers([]);
     };
   }, [provider]);
 

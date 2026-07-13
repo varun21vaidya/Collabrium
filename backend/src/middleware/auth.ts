@@ -13,6 +13,9 @@ interface AuthenticatedRequest extends Request {
   user?: AuthClaims;
 }
 
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: JWT_SECRET environment variable must be set in production');
+}
 const JWT_SECRET: string = process.env.JWT_SECRET || 'dev-secret-change-me';
 
 export function signToken(payload: Omit<AuthClaims, 'iat' | 'exp'>, expiresIn: string = '7d'): string {

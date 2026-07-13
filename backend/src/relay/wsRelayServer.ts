@@ -5,8 +5,11 @@ import { persistDocument, loadDocument } from '../persistence/mongoPersistence.j
 
 const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
+const MAX_MESSAGE_SIZE = 1024 * 1024;
+const MAX_CONNECTIONS_PER_DOC = 50;
 
 const activeDocs: Map<string, Y.Doc> = new Map();
+const docPromises: Map<string, Promise<Y.Doc>> = new Map();
 const persistTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
 const logger = {
@@ -16,21 +19,29 @@ const logger = {
 };
 
 async function getOrCreateDoc(documentId: string): Promise<Y.Doc> {
-  const existing = activeDocs.get(documentId);
-  if (existing) return existing;
-
-  const doc = new Y.Doc();
-  const savedState = await loadDocument(documentId);
-  if (savedState) {
-    try {
-      Y.applyUpdate(doc, savedState);
-      logger.info('Loaded Y.Doc from persistence', { documentId, bytes: savedState.byteLength });
-    } catch (err) {
-      logger.error('Failed to apply persisted state', { documentId, error: (err as Error).message });
-    }
+  if (activeDocs.has(documentId)) return activeDocs.get(documentId)!;
+  if (!docPromises.has(documentId)) {
+    const creation = (async () => {
+      try {
+        const doc = new Y.Doc();
+        const savedState = await loadDocument(documentId);
+        if (savedState) {
+          try {
+            Y.applyUpdate(doc, savedState);
+            logger.info('Loaded Y.Doc from persistence', { documentId, bytes: savedState.byteLength });
+          } catch (err) {
+            logger.error('Failed to apply persisted state', { documentId, error: (err as Error).message });
+          }
+        }
+        activeDocs.set(documentId, doc);
+        return doc;
+      } finally {
+        docPromises.delete(documentId);
+      }
+    })();
+    docPromises.set(documentId, creation);
   }
-  activeDocs.set(documentId, doc);
-  return doc;
+  return docPromises.get(documentId)!;
 }
 
 function encodeMessage(type: number, payload: Uint8Array): Buffer {
@@ -47,21 +58,76 @@ function decodeMessage(data: Buffer): { type: number; payload: Uint8Array } {
   };
 }
 
+async function persistWithRetry(documentId: string, state: Uint8Array, maxRetries = 3): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await persistDocument(documentId, state);
+      return;
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = 1000 * 2 ** (attempt - 1);
+      logger.warn('Persistence retry', { documentId, attempt, delay, error: (err as Error).message });
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
 function schedulePersist(documentId: string, ydoc: Y.Doc): void {
   const existing = persistTimers.get(documentId);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(async () => {
     try {
       const state = Y.encodeStateAsUpdate(ydoc);
-      await persistDocument(documentId, state);
+      await persistWithRetry(documentId, state);
       logger.info('Persisted Y.Doc snapshot', { documentId, bytes: state.byteLength });
     } catch (err) {
-      logger.error('Persistence failed', { documentId, error: (err as Error).message });
+      logger.error('Persistence failed after retries', { documentId, error: (err as Error).message });
     } finally {
       persistTimers.delete(documentId);
     }
   }, 2000);
   persistTimers.set(documentId, timer);
+}
+
+export async function flushAllDocuments(): Promise<void> {
+  const promises = Array.from(activeDocs.entries()).map(async ([docId, ydoc]) => {
+    try {
+      const state = Y.encodeStateAsUpdate(ydoc);
+      await persistDocument(docId, state);
+      logger.info('Flushed document on shutdown', { docId });
+    } catch (err) {
+      logger.error('Flush failed on shutdown', { docId, error: (err as Error).message });
+    }
+  });
+  await Promise.allSettled(promises);
+}
+
+const GC_INTERVAL_MS = 60_000;
+
+const gcTimer = setInterval(() => {
+  for (const [docId, ydoc] of activeDocs) {
+    if (roomManager.getRoomSize(docId) === 0) continue;
+    try {
+      const stateSize = Y.encodeStateAsUpdate(ydoc).byteLength;
+      if (stateSize > 5 * 1024 * 1024) {
+        logger.warn('Large Y.Doc detected', { docId, bytes: stateSize });
+      }
+    } catch (err) {
+      logger.error('GC check failed', { docId, error: (err as Error).message });
+    }
+  }
+}, GC_INTERVAL_MS);
+
+export function getActiveDocCount(): number {
+  return activeDocs.size;
+}
+
+export function getTotalConnections(): number {
+  let total = 0;
+  for (const docId of activeDocs.keys()) {
+    total += roomManager.getRoomSize(docId);
+  }
+  return total;
 }
 
 export function handleRelayConnection(ws: WebSocket, documentId: string, userId: string): void {
@@ -85,6 +151,12 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
   ws.on('pong', () => {
     isAlive = true;
   });
+
+  if (roomManager.getRoomSize(documentId) >= MAX_CONNECTIONS_PER_DOC) {
+    logger.warn('Room full, rejecting connection', { documentId, userId, currentSize: roomManager.getRoomSize(documentId) });
+    ws.close(1013, 'Room full');
+    return;
+  }
 
   (async () => {
     try {
@@ -111,6 +183,12 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
 
   ws.on('message', (raw: Buffer) => {
     if (!ydoc) return;
+
+    if (raw.length > MAX_MESSAGE_SIZE) {
+      logger.warn('Message too large, closing connection', { documentId, userId, size: raw.length });
+      ws.close(1009, 'Message too large');
+      return;
+    }
 
     try {
       const { type, payload } = decodeMessage(raw);

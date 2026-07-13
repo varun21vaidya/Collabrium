@@ -6,6 +6,7 @@ import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import { useYjsDocument } from '../hooks/useYjsDocument';
 import PresenceBar from './PresenceBar';
 import ConnectionStatus from './ConnectionStatus';
+import ErrorBoundary from './ErrorBoundary';
 import { getUserColor } from '../lib/userColor';
 
 interface EditorProps {
@@ -70,7 +71,9 @@ const Editor: React.FC<EditorProps> = ({ documentId, token, userName, userId }) 
         </div>
       </div>
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <EditorContent editor={editor} />
+        <ErrorBoundary fallback={<div className="text-center py-8 text-red-500">Editor failed to load. Please refresh the page.</div>}>
+          <EditorContent editor={editor} />
+        </ErrorBoundary>
       </div>
       <style>{`
         .collaboration-cursor__caret {

@@ -5,16 +5,33 @@ import DocumentModel from '../models/Document.js';
 
 const router = Router();
 
+const PAGE_SIZE = 50;
+
 router.get('/', authMiddleware, async (req: Request, res: Response) => {
   const userId = (req as any).user.sub;
+  const page = Math.max(1, parseInt(req.query.page as string) || 1);
   try {
-    const docs = await DocumentModel.find({
+    const filter = {
       $or: [{ ownerId: userId }, { collaboratorIds: userId }],
-    })
-      .select('title lastEditedAt ownerId')
-      .sort({ updatedAt: -1 })
-      .lean();
-    res.json({ documents: docs });
+    };
+    const [docs, total] = await Promise.all([
+      DocumentModel.find(filter)
+        .select('title lastEditedAt ownerId')
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * PAGE_SIZE)
+        .limit(PAGE_SIZE)
+        .lean(),
+      DocumentModel.countDocuments(filter),
+    ]);
+    res.json({
+      documents: docs,
+      pagination: {
+        page,
+        pageSize: PAGE_SIZE,
+        total,
+        hasMore: page * PAGE_SIZE < total,
+      },
+    });
   } catch (err) {
     console.error('[Documents] List failed:', (err as Error).message);
     res.status(500).json({ error: 'Failed to fetch documents' });
