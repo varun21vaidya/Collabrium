@@ -2297,3 +2297,505 @@ render();
 </script>
 </body>
 </html>
+
+============================================================
+FILE: docs/high-level-design.md
+============================================================
+# Collabrium — High-Level Design
+
+## Overview
+
+Collabrium is a real-time collaborative rich-text editor. Multiple users edit the same document simultaneously. Edits merge conflict-free via CRDTs (Conflict-Free Replicated Data Types). The server acts as an opaque relay — it never inspects document content.
+
+## System Context
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌──────────┐
+│  Browser A   │────▶                  │────▶│          │
+│  (Alice)     │     │                  │     │ MongoDB  │
+└─────────────┘     │   Collabrium     │     │          │
+                    │   Relay Server    │     └──────────┘
+┌─────────────┐     │   (Stateless     │
+│  Browser B   │────▶    Opaque Relay) │
+│  (Bob)       │     │                  │
+└─────────────┘     └──────────────────┘
+```
+
+## Key Design Decisions
+
+### 1. Server as Opaque Relay
+
+The server never parses or inspects CRDT payloads. All Yjs merge logic runs client-side. This:
+
+- Eliminates server-side merge bugs
+- Makes horizontal scaling trivial (any relay instance works)
+- Simplifies security (server cannot leak document content)
+
+### 2. CRDT over OT
+
+Chosen Yjs (CRDT) over OT (Operational Transform) because:
+
+- No central server authority required
+- Handles offline edits seamlessly
+- Peer-to-peer capable
+- Mature ecosystem (y-websocket, y-indexeddb, TipTap integration)
+
+### 3. Binary Protocol
+
+WebSocket messages use a 1-byte type prefix:
+
+| Type | Value | Purpose |
+|------|-------|---------|
+| MESSAGE_SYNC | 0 | Yjs document updates |
+| MESSAGE_AWARENESS | 1 | Cursor positions, presence |
+
+### 4. Debounced Persistence
+
+Y.Doc snapshots flush to MongoDB 2 seconds after the last edit. This:
+
+- Prevents database thundering herd
+- Batches rapid edits into single writes
+- Provides acceptable durability window
+
+### 5. Offline-First Client
+
+Browser stores a local Yjs copy via IndexedDB (y-indexeddb). On reconnect:
+
+1. Client reconnects WebSocket
+2. Server sends full document state
+3. Yjs merges local offline edits with server state
+4. No conflicts — CRDT guarantees convergence
+
+## Data Flow
+
+### Edit Propagation
+
+```
+Alice types "hello"
+  │
+  ▼
+TipTap editor → Yjs document
+  │
+  ▼
+Yjs produces binary update → WebsocketProvider
+  │
+  ▼
+WebSocket message (type=0, payload=binary)
+  │
+  ▼
+Relay Server
+  ├── Broadcasts to all other clients (Bob, Carol)
+  ├── Schedules debounced persistence (2s)
+  └── Never inspects content
+        │
+        ▼
+   Bob's browser receives update
+        │
+        ▼
+   Yjs applies update → TipTap re-renders
+```
+
+### Connection Lifecycle
+
+```
+Client connects to /collab?doc=<id>&token=<jwt>
+  │
+  ▼
+Server validates:
+  ├── documentId is valid MongoDB ObjectId
+  └── JWT token is valid (sub, name claims)
+        │
+        ▼
+Server creates/loads Y.Doc (getOrCreateDoc)
+  ├── First client: new Y.Doc, load from MongoDB if exists
+  └── Subsequent clients: reuse existing in-memory Y.Doc
+        │
+        ▼
+Server sends full document state to new client
+  │
+  ▼
+Client initializes TipTap editor with received state
+  │
+  ▼
+Collaboration begins — bidirectional sync
+```
+
+## Security Model
+
+| Layer | Mechanism |
+|-------|-----------|
+| Authentication | JWT with 7-day expiry |
+| WebSocket Upgrade | Token validated before upgrade completes |
+| HTTP Routes | Bearer token via authMiddleware |
+| Document Access | ownerId / collaboratorIds enforced server-side |
+| ObjectId Injection | mongoose.Types.ObjectId.isValid() check |
+| Rate Limiting | 10 req/15min on demo token endpoint |
+| Message Size | 1MB cap on WS messages |
+| Input Sanitization | Document title sliced to 200 chars |
+
+## Performance Characteristics
+
+| Aspect | Behavior |
+|--------|----------|
+| Server memory per doc | ~1-5 MB per active Y.Doc |
+| Persistence latency | 2s debounce + MongoDB write time |
+| WS message overhead | 1 byte type prefix per message |
+| Heartbeat interval | 30s ping/pong |
+| Max connections per doc | 50 (configurable) |
+| Persistence retry | 3 attempts, exponential backoff (1s, 2s, 4s) |
+
+## Deployment
+
+See `docker-compose.yml` for local deployment. Production requires:
+
+1. Set `JWT_SECRET` to 32+ byte random value
+2. Set `NODE_ENV=production`
+3. Configure MongoDB replica set for durability
+4. Set up reverse proxy (nginx/Caddy) for TLS termination
+5. Configure log aggregation (server uses console.log)
+6. Monitor `GET /health/ws` for active connections
+
+## Testing
+
+```bash
+cd backend
+npm test          # vitest run
+npm run test:watch  # vitest watch mode
+```
+
+See `backend/tests/roomManager.test.ts` for example test.
+
+============================================================
+FILE: docs/architecture.md
+============================================================
+# Collabrium — Architecture
+
+## Module Overview
+
+```
+collab-editor/
+│
+├── backend/                          # Node.js + Express + WebSocket relay
+│   ├── src/
+│   │   ├── server.ts                 # Entry point: Express + WS upgrade + graceful shutdown
+│   │   ├── middleware/
+│   │   │   └── auth.ts               # JWT sign/verify, authMiddleware, verifyWsToken
+│   │   ├── models/
+│   │   │   └── Document.ts           # Mongoose schema for documents
+│   │   ├── persistence/
+│   │   │   └── mongoPersistence.ts   # loadDocument / persistDocument
+│   │   ├── relay/
+│   │   │   ├── roomManager.ts        # Room membership tracking
+│   │   │   └── wsRelayServer.ts      # CRDT relay: getOrCreateDoc, schedulePersist, GC
+│   │   └── routes/
+│   │       └── documents.ts          # REST: list (paginated), create, delete
+│   └── tests/
+│       └── roomManager.test.ts       # Vitest unit tests
+│
+├── frontend/                         # React 18 + TipTap + Vite
+│   ├── src/
+│   │   ├── App.tsx                   # Auth flow: login → document list → editor
+│   │   ├── main.tsx                  # React root mount
+│   │   ├── components/
+│   │   │   ├── Editor.tsx            # TipTap editor with Collaboration extensions
+│   │   │   ├── ErrorBoundary.tsx     # React error boundary wrapper
+│   │   │   ├── PresenceBar.tsx       # Online user avatars
+│   │   │   ├── ConnectionStatus.tsx  # Connection indicator
+│   │   │   └── DocumentList.tsx      # Document CRUD list
+│   │   ├── hooks/
+│   │   │   ├── useYjsDocument.ts     # Y.Doc + WebsocketProvider + IndexedDB
+│   │   │   └── useConnectionStatus.ts # Standalone WS status hook
+│   │   └── lib/
+│   │       └── userColor.ts          # Deterministic color from user ID
+│   ├── index.html
+│   └── package.json
+│
+├── docs/
+│   ├── architecture.md               # This file
+│   └── high-level-design.md          # HLD overview
+│
+├── docker-compose.yml                # MongoDB + backend containers
+├── fix-plan.html                     # Code review task tracker
+└── README.md
+```
+
+---
+
+## Backend Architecture
+
+### server.ts (Entry Point)
+
+**Responsibilities:**
+- Express app setup (CORS, JSON parsing)
+- HTTP routes: `/health`, `/api/auth/demo-token`, `/api/documents/*`
+- WebSocket upgrade handler on `/collab?doc=&token=`
+- Graceful shutdown (SIGTERM/SIGINT)
+
+**Key imports:**
+- `handleRelayConnection` — per-connection WS handler
+- `flushAllDocuments` — persists all active Y.Docs on shutdown
+- `getActiveDocCount`, `getTotalConnections` — health/ws metrics
+
+**Rate limiting:** `express-rate-limit` on demo-token endpoint (10 req / 15 min per IP)
+
+### auth.ts (JWT Middleware)
+
+**Signing:** HS256 with configurable `JWT_SECRET` (env var)
+**Verification:** `verifyToken()` validates JWT, checks `sub` and `name` claims
+**Middleware:** `authMiddleware` for HTTP routes, `verifyWsToken` for WS upgrade
+
+**Hardening:** Throws at startup if `NODE_ENV=production` and `JWT_SECRET` unset
+
+### wsRelayServer.ts (CRDT Relay)
+
+**Core data structures:**
+- `activeDocs: Map<string, Y.Doc>` — in-memory Yjs documents
+- `docPromises: Map<string, Promise<Y.Doc>>` — serializes concurrent creation
+- `persistTimers: Map<string, Timeout>` — debounce timers per document
+
+**Flow per connection:**
+
+1. Room capacity check (≤50 clients) — rejects with close code 1013 if full
+2. `getOrCreateDoc()` — returns existing or creates new Y.Doc (race-free via Promise map)
+3. `roomManager.join()` — tracks membership
+4. Sends full Y.Doc state to new client
+5. Message loop: decode 1-byte type prefix, relay to room, schedule persist
+6. Message size check: rejects >1MB with close code 1009
+7. On close: leave room, final flush if last client, destroy Y.Doc
+
+**Persistence:**
+- `schedulePersist()` — 2s debounce, calls `persistWithRetry()`
+- `persistWithRetry()` — 3 attempts with exponential backoff (1s, 2s, 4s)
+- `flushAllDocuments()` — exports for graceful shutdown
+
+**GC Monitoring:**
+- 60-second interval checks active doc sizes
+- Warns if any doc exceeds 5MB
+
+### roomManager.ts
+
+```typescript
+class RoomManager {
+  private rooms: Map<string, Map<WebSocket, ClientMetadata>>
+  
+  join(documentId, ws, userId)     // Add to room
+  leave(documentId, ws)            // Remove, auto-cleanup empty rooms
+  broadcast(documentId, sender, data)  // Relay to all except sender
+  getRoomSize(documentId): number   // Client count
+  getRoomClients(documentId): ClientMetadata[]  // User info
+  hasRoom(documentId): boolean      // Room existence check
+}
+```
+
+### mongoPersistence.ts
+
+- `loadDocument(id)` — findById, returns `yjsState` as Uint8Array or null
+- `persistDocument(id, state)` — upserts yjsState + lastEditedAt timestamp
+
+### Document Model (Mongoose)
+
+```typescript
+{
+  title: string                  // Trimmed, max 200 chars
+  ownerId: string                // Indexed
+  collaboratorIds: string[]      // Indexed
+  yjsState: Buffer               // Binary Y.Doc snapshot
+  lastEditedAt: Date             // Updated on persist
+  lastEditedBy: string           // User ID
+  timestamps: true               // createdAt, updatedAt
+}
+```
+
+Indexes: `ownerId+updatedAt`, `collaboratorIds+updatedAt`, `lastEditedAt`
+
+### documents.ts (REST Routes)
+
+- `GET /` — Paginated list (50/page), filtered by ownerId/collaboratorIds
+- `POST /` — Create document, validate title (max 200 chars)
+- `DELETE /:id` — Delete own document, validate ObjectId
+
+---
+
+## Frontend Architecture
+
+### App.tsx (Entry Component)
+
+**States:**
+1. **Login screen** — Select demo user identity (4 users)
+2. **Document list** — CRUD documents via REST API
+3. **Editor** — Full collaborative editing experience
+
+**Auth flow:** POST `/api/auth/demo-token` → receive JWT → store in state
+
+### Editor.tsx (TipTap Integration)
+
+**Extensions:**
+- `StarterKit` (history disabled — Yjs handles undo)
+- `Collaboration` — binds Y.Doc to TipTap document
+- `CollaborationCursor` — renders remote cursors with color
+
+**Error handling:** Wrapped in `ErrorBoundary` to catch rendering crashes
+
+### PresenceBar.tsx
+
+Reads `provider.awareness.getStates()` to display online users.
+Shows up to 6 avatars + overflow count.
+Clears state on unmount.
+
+### ConnectionStatus.tsx
+
+Visual indicator with 4 states: connected (green), connecting (amber/pulse), disconnected (gray), syncing (blue/pulse).
+
+### useYjsDocument.ts (Core Hook)
+
+**Creates:**
+1. `Y.Doc` instance (memoized per documentId)
+2. `WebsocketProvider` — connects to relay at `/collab?doc=&token=`
+3. `IndexeddbPersistence` — local offline cache
+
+**Lifecycle:**
+- Sets awareness user state (name, color)
+- Listens for status/sync events on provider
+- Handles offline/online browser events
+- Cleanup: destroy provider, destroy IndexedDB persistence, clear awareness
+
+### useConnectionStatus.ts
+
+Standalone hook for monitoring WebSocket connection state externally.
+
+### userColor.ts
+
+Deterministic color assignment from user ID via hash function. 8-color palette.
+
+---
+
+## Wire Protocol
+
+### WebSocket Connection
+
+```
+ws://host:3002/collab?doc=<mongo-object-id>&token=<jwt>
+```
+
+### Binary Message Format
+
+```
+┌─────────┬──────────────────────────────┐
+│ 1 byte  │   N bytes                    │
+│  type   │   payload                    │
+├─────────┼──────────────────────────────┤
+│    0    │   Yjs binary update (sync)   │
+│    1    │   Awareness update           │
+└─────────┴──────────────────────────────┘
+```
+
+### Message Flow
+
+```
+Client → Server:
+  type=0: Yjs document update → relay to room + schedule persist
+  type=1: Awareness (cursor) → relay to room (no persist)
+
+Server → Client:
+  type=0: Full state on join, incremental updates from peers
+  type=1: Cursor/presence from peers
+```
+
+---
+
+## Error Handling Strategy
+
+| Layer | Approach |
+|-------|----------|
+| Express routes | try-catch → 500 JSON response |
+| WebSocket messages | try-catch → structured error log, non-fatal |
+| Persistence | Exponential backoff retry (3 attempts) |
+| JWT verification | Returns null on any failure (no stack leaks) |
+| React rendering | ErrorBoundary with fallback UI |
+| WS connection | Auto-reconnect via y-websocket (maxBackoffTime: 2500ms) |
+| Shutdown | flushAllDocuments → server.close → mongoose.disconnect |
+
+---
+
+## Graceful Shutdown Sequence
+
+```
+SIGTERM/SIGINT received
+  │
+  ▼
+flushAllDocuments()
+  ├── For each active Y.Doc:
+  │   ├── Y.encodeStateAsUpdate(ydoc)
+  │   └── persistDocument(docId, state)
+  └── Promise.allSettled() — all attempts, ignore individual failures
+  │
+  ▼
+server.close() — stop accepting new connections
+  │
+  ▼
+mongoose.disconnect()
+  │
+  ▼
+process.exit(0)
+```
+
+---
+
+## Security Architecture
+
+```
+┌──────────────┐
+│   Browser    │
+│  (Client)    │
+└──────┬───────┘
+       │
+       │ WebSocket upgrade: /collab?doc=X&token=JWT
+       │ HTTP: Authorization: Bearer JWT
+       ▼
+┌──────────────┐
+│  Server      │
+│              │
+│  ┌────────┐  │
+│  │  JWT   │──│── Verify signature + claims (sub, name)
+│  │ Verify │  │
+│  └────────┘  │
+│              │
+│  ┌────────┐  │
+│  │ Rate   │──│── 10 req / 15 min per IP (demo-token)
+│  │ Limit  │  │
+│  └────────┘  │
+│              │
+│  ┌────────┐  │
+│  │ Object │──│── mongoose.Types.ObjectId.isValid()
+│  │ ID     │  │
+│  │ Check  │  │
+│  └────────┘  │
+│              │
+│  ┌────────┐  │
+│  │ WS Msg │──│── 1MB max payload size
+│  │ Limit  │  │
+│  └────────┘  │
+│              │
+│  ┌────────┐  │
+│  │ Room   │──│── 50 max connections per document
+│  │ Cap    │  │
+│  └────────┘  │
+└──────────────┘
+---
+
+## Production Readiness Checklist
+
+- [x] Graceful shutdown with document flush
+- [x] Race-free document creation
+- [x] Rate limited demo token endpoint
+- [x] WebSocket message size limit
+- [x] Fail-fast on missing JWT secret in production
+- [x] Retry logic for persistence failures
+- [x] Connection limit per document
+- [x] Periodic document size monitoring
+- [x] Paginated document list
+- [x] Error boundary for editor crashes
+- [x] Clean presence state on unmount
+- [x] WebSocket health endpoint /health/ws
+- [x] Docker HEALTHCHECK
+- [x] Automated test suite

@@ -60,17 +60,21 @@ collab-editor/
 │   │   ├── middleware/        # JWT auth middleware
 │   │   ├── models/           # Mongoose schema
 │   │   └── server.ts         # Express + WS entry point
+│   ├── tests/                # Vitest test suite
 │   ├── .env.example
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # Editor, PresenceBar, ConnectionStatus, DocumentList
+│   │   ├── components/       # Editor, ErrorBoundary, PresenceBar, ConnectionStatus, DocumentList
 │   │   ├── hooks/            # useYjsDocument, useConnectionStatus
 │   │   ├── lib/              # userColor utility
 │   │   ├── App.tsx
 │   │   └── main.tsx
 │   ├── index.html
 │   └── package.json
+├── docs/
+│   ├── architecture.md       # Detailed architecture documentation
+│   └── high-level-design.md  # High-level design document
 ├── docker-compose.yml
 └── README.md
 ```
@@ -85,6 +89,8 @@ collab-editor/
 ## Architecture
 
 The server is a dumb relay — it never inspects document content. Yjs CRDT logic runs identically on every client, guaranteeing convergence regardless of message arrival order. The server only rebroadcasts binary updates and periodically persists Y.Doc snapshots to MongoDB.
+
+See [High-Level Design](docs/high-level-design.md) and [Architecture Details](docs/architecture.md) for comprehensive documentation.
 
 ## License
 
