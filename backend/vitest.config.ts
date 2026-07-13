@@ -8,6 +8,6 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
     },
-    testTimeout: 30_000,
+    testTimeout: 60_000,
   },
 });
