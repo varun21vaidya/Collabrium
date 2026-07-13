@@ -13,6 +13,7 @@ import { verifyWsToken, signToken } from './middleware/auth.js';
 import DocumentModel from './models/Document.js';
 import documentsRouter from './routes/documents.js';
 import { logger } from './logger.js';
+import { initSentry, Sentry } from './sentry.js';
 import { register, httpRequestsTotal, wsConnectionsActive, activeDocumentsGauge } from './metrics.js';
 
 const app = express();
@@ -58,6 +59,8 @@ app.use((req: Request, res: Response, next) => {
   });
   next();
 });
+
+initSentry(app);
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
