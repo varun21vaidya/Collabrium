@@ -1,16 +1,15 @@
-import 'dotenv/config';
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
-import authRouter from '../backend/src/routes/auth.ts';
-import documentsRouter from '../backend/src/routes/documents.ts';
-import invitesRouter from '../backend/src/routes/invites.ts';
-import historyRouter from '../backend/src/routes/history.ts';
-import { logger } from '../backend/src/logger.ts';
-import { register, httpRequestsTotal } from '../backend/src/metrics.ts';
-import { getActiveDocCount, getTotalConnections } from '../backend/src/relay/wsRelayServer.ts';
+import authRouter from '../backend/dist/routes/auth.js';
+import documentsRouter from '../backend/dist/routes/documents.js';
+import invitesRouter from '../backend/dist/routes/invites.js';
+import historyRouter from '../backend/dist/routes/history.js';
+import { logger } from '../backend/dist/logger.js';
+import { register, httpRequestsTotal } from '../backend/dist/metrics.js';
+import { getActiveDocCount, getTotalConnections } from '../backend/dist/relay/wsRelayServer.js';
 
 const app = express();
 
@@ -40,7 +39,7 @@ const apiLimiter = rateLimit({
 
 app.use('/api/', apiLimiter);
 
-app.use((req: Request, res: Response, next) => {
+app.use((req, res, next) => {
   res.on('finish', () => {
     httpRequestsTotal.inc({ method: req.method, route: req.route?.path || req.path, status: res.statusCode });
   });
@@ -50,7 +49,7 @@ app.use((req: Request, res: Response, next) => {
 let mongoConnected = false;
 let mongoConnecting = false;
 
-async function connectMongo(): Promise<void> {
+async function connectMongo() {
   if (mongoConnected || mongoConnecting) return;
   mongoConnecting = true;
   try {
@@ -65,29 +64,29 @@ async function connectMongo(): Promise<void> {
     mongoConnected = true;
     logger.info('MongoDB connected');
   } catch (err) {
-    logger.error({ error: (err as Error).message }, 'MongoDB connection failed');
+    logger.error({ error: err.message }, 'MongoDB connection failed');
   } finally {
     mongoConnecting = false;
   }
 }
 
-app.use(async (_req: Request, _res: Response, next: NextFunction) => {
+app.use(async (_req, _res, next) => {
   if (!mongoConnected && !mongoConnecting) {
     await connectMongo();
   }
   next();
 });
 
-app.get('/health', (_req: Request, res: Response) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/metrics', async (_req: Request, res: Response) => {
+app.get('/metrics', async (_req, res) => {
   res.set('Content-Type', register.contentType);
   res.end(await register.metrics());
 });
 
-app.get('/health/ws', (_req: Request, res: Response) => {
+app.get('/health/ws', (_req, res) => {
   res.json({
     activeDocuments: getActiveDocCount(),
     totalConnections: getTotalConnections(),
@@ -95,7 +94,7 @@ app.get('/health/ws', (_req: Request, res: Response) => {
   });
 });
 
-app.get('/health/ready', async (_req: Request, res: Response) => {
+app.get('/health/ready', async (_req, res) => {
   const mongoState = mongoConnected ? 'ok' : 'pending';
   res.json({ status: mongoState === 'ok' ? 'ok' : 'degraded', mongo: mongoState });
 });
@@ -105,7 +104,7 @@ app.use('/api/documents', documentsRouter);
 app.use('/api', invitesRouter);
 app.use('/api/documents', historyRouter);
 
-app.use((_req: Request, res: Response) => {
+app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
