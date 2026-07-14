@@ -47,34 +47,32 @@ app.use((req, res, next) => {
   next();
 });
 
-let mongoPromise = null;
+// Serverless MongoDB connection cache
+let cachedDb = null;
 
-async function connectMongo() {
-  try {
-    const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/collab-editor';
-    await mongoose.connect(uri, {
-      maxPoolSize: 10,
-      minPoolSize: 2,
-      maxIdleTimeMS: 30_000,
-      connectTimeoutMS: 10_000,
-      socketTimeoutMS: 30_000,
-    });
-    logger.info('MongoDB connected');
-  } catch (err) {
-    logger.error({ error: err.message }, 'MongoDB connection failed');
-    throw err;
-  }
+async function dbConnect() {
+  if (cachedDb && mongoose.connection.readyState === 1) return cachedDb;
+  const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/collab-editor';
+  logger.info({ uri: uri.replace(/\/\/.*@/, '//***@') }, 'Connecting to MongoDB');
+  await mongoose.connect(uri, {
+    bufferTimeoutMS: 0,
+    maxPoolSize: 10,
+    minPoolSize: 2,
+    connectTimeoutMS: 30000,
+    socketTimeoutMS: 60000,
+    serverSelectionTimeoutMS: 15000,
+  });
+  cachedDb = mongoose.connection;
+  logger.info('MongoDB connected');
+  return cachedDb;
 }
 
-mongoPromise = connectMongo();
-
+// Middleware: ensure DB connected before every request
 app.use(async (_req, _res, next) => {
-  if (mongoPromise) {
-    try {
-      await mongoPromise;
-    } catch {
-      // connection failed, continue anyway — routes will fail gracefully
-    }
+  try {
+    await dbConnect();
+  } catch (err) {
+    logger.error({ error: err.message }, 'MongoDB connection failed');
   }
   next();
 });
