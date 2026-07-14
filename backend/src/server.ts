@@ -9,9 +9,12 @@ import { IncomingMessage } from 'http';
 import rateLimit from 'express-rate-limit';
 import pinoHttp from 'pino-http';
 import { handleRelayConnection, flushAllDocuments, getActiveDocCount, getTotalConnections } from './relay/wsRelayServer.js';
-import { verifyWsToken, signToken } from './middleware/auth.js';
+import { verifyWsToken } from './middleware/auth.js';
 import DocumentModel from './models/Document.js';
+import authRouter from './routes/auth.js';
 import documentsRouter from './routes/documents.js';
+import invitesRouter from './routes/invites.js';
+import historyRouter from './routes/history.js';
 import { logger } from './logger.js';
 import { initSentry, Sentry } from './sentry.js';
 import { register, httpRequestsTotal, wsConnectionsActive, activeDocumentsGauge } from './metrics.js';
@@ -41,14 +44,6 @@ const apiLimiter = rateLimit({
   message: { error: 'Too many requests, please try again later' },
 });
 
-const tokenLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many token requests, please try again later' },
-});
-
 app.use('/api/', apiLimiter);
 
 app.use(pinoHttp({ logger }));
@@ -71,25 +66,34 @@ app.get('/metrics', async (_req: Request, res: Response) => {
   res.end(await register.metrics());
 });
 
-app.post('/api/auth/demo-token', tokenLimiter, (req: Request, res: Response) => {
-  const { userId, name } = req.body;
-  if (!userId || !name) {
-    res.status(400).json({ error: 'userId and name required' });
-    return;
-  }
-  const token = signToken({ sub: userId, name });
-  res.json({ token, userId, name });
-});
+app.use('/api/auth', authRouter);
 
 app.get('/health/ws', (_req: Request, res: Response) => {
+  const mem = process.memoryUsage();
   res.json({
     activeDocuments: getActiveDocCount(),
     totalConnections: getTotalConnections(),
     uptime: process.uptime(),
+    memory: {
+      heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+      rssMB: Math.round(mem.rss / 1024 / 1024),
+    },
   });
 });
 
+app.get('/health/ready', async (_req: Request, res: Response) => {
+  const mongoState = mongoose.connection.readyState === 1 ? 'ok' : 'failed';
+  if (mongoState === 'failed') {
+    res.status(503).json({ status: 'unhealthy', mongo: mongoState });
+    return;
+  }
+  res.json({ status: 'ok', mongo: mongoState });
+});
+
 app.use('/api/documents', documentsRouter);
+app.use('/api', invitesRouter);
+app.use('/api/documents', historyRouter);
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
 
@@ -101,7 +105,7 @@ async function checkDocumentAccess(documentId: string, userId: string): Promise<
     if (!doc) return false;
     return doc.ownerId === userId || doc.collaboratorIds.includes(userId);
   } catch (err) {
-    logger.error('ACL check failed', { documentId, userId, error: (err as Error).message });
+    logger.error({ documentId, userId, error: (err as Error).message }, 'ACL check failed');
     return false;
   }
 }
@@ -109,7 +113,7 @@ async function checkDocumentAccess(documentId: string, userId: string): Promise<
 server.on('upgrade', async (request: IncomingMessage, socket, head) => {
   const url = new URL(request.url || '/', `http://${request.headers.host}`);
 
-  if (url.pathname !== '/collab') {
+  if (url.pathname.startsWith('/api')) {
     socket.destroy();
     return;
   }
@@ -132,7 +136,7 @@ server.on('upgrade', async (request: IncomingMessage, socket, head) => {
 
   const hasAccess = await checkDocumentAccess(documentId, claims.sub);
   if (!hasAccess) {
-    logger.warn('Access denied to document', { documentId, userId: claims.sub });
+    logger.warn({ documentId, userId: claims.sub }, 'Access denied to document');
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     socket.destroy();
     return;
@@ -164,7 +168,7 @@ async function start(): Promise<void> {
       logger.info(`Server listening on :${PORT}`);
     });
   } catch (err) {
-    logger.error('Failed to start server', { error: (err as Error).message });
+    logger.error({ error: (err as Error).message }, 'Failed to start server');
     process.exit(1);
   }
 }
@@ -189,7 +193,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     await mongoose.disconnect();
     logger.info('MongoDB disconnected');
   } catch (err) {
-    logger.error('MongoDB disconnect failed', { error: (err as Error).message });
+    logger.error({ error: (err as Error).message }, 'MongoDB disconnect failed');
   }
 
   logger.info('Graceful shutdown complete');

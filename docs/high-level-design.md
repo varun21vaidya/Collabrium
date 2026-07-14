@@ -28,6 +28,17 @@ The server never parses or inspects CRDT payloads. All Yjs merge logic runs clie
 - Makes horizontal scaling trivial (any relay instance works)
 - Simplifies security (server cannot leak document content)
 
+### 1b. Collaborative features on shared Yjs types
+
+Chat messages, comments, and cursor awareness all piggyback on the same Yjs sync layer. No separate database — everything is CRDT-backed:
+
+| Feature | Yjs Type | Key |
+|---------|----------|-----|
+| Document content | Y.Doc (implicit) | — |
+| Presence / cursors | Awareness protocol | — |
+| Team chat | Y.Array of Y.Map | `"chat"` |
+| Inline comments | Y.Array of Y.Map | `"comments"` |
+
 ### 2. CRDT over OT
 
 Chosen Yjs (CRDT) over OT (Operational Transform) because:

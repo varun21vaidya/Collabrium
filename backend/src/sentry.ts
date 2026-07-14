@@ -1,4 +1,4 @@
-import Sentry from '@sentry/node';
+import * as Sentry from '@sentry/node';
 import { logger } from './logger.js';
 
 export function initSentry(app: Parameters<typeof Sentry.setupExpressErrorHandler>[0]): void {

@@ -4,6 +4,8 @@ Real-time collaborative rich-text editor powered by CRDTs (Yjs), TipTap, and Web
 
 Multiple users edit the same document simultaneously — every keystroke merges cleanly with no conflicts. Live cursors, presence, and offline-first sync included.
 
+**Features:** Inline comments, team chat, document version history, collaborator invites, shareable links, and private demo auth.
+
 ## Stack
 
 - **Frontend:** React 18, TypeScript, TipTap (ProseMirror), Tailwind CSS, Vite
@@ -20,35 +22,51 @@ Multiple users edit the same document simultaneously — every keystroke merges 
 - Node.js 20+
 - MongoDB (local or Docker)
 
-### 1. Backend
-
-```bash
-cd backend
-cp .env.example .env
-npm install
-npm run dev
-```
-
-Server starts on `http://localhost:3002`.
-
-### 2. Frontend
-
-```bash
-cd frontend
-cp .env.example .env
-npm install
-npm run dev
-```
-
-App opens at `http://localhost:5173`.
-
-### Docker (full stack)
+### Quick Start (Docker)
 
 ```bash
 docker compose up -d
 ```
 
 Starts MongoDB + backend + frontend (nginx). App at `http://localhost`.
+
+---
+
+### Manual Start (dev mode)
+
+Start services **in order**: MongoDB → Backend → Frontend.
+
+#### 1. MongoDB
+
+```bash
+# Option A: Docker
+docker run -d -p 27017:27017 --name collabrium-mongo mongo:7
+
+# Option B: local mongod (if installed)
+mongod --dbpath /data/db
+```
+
+#### 2. Backend
+
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+Server starts on `http://localhost:3002`.
+
+#### 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+App opens at `http://localhost:5173`.
+
+> `.env` files are pre-configured for local dev. No setup needed.
 
 ## Environment Variables
 
@@ -71,36 +89,36 @@ Starts MongoDB + backend + frontend (nginx). App at `http://localhost`.
 collab-editor/
 ├── backend/
 │   ├── src/
-│   │   ├── relay/            # WebSocket relay server, room manager
-│   │   ├── persistence/      # MongoDB load/save for Y.Doc snapshots
-│   │   ├── routes/           # REST API routes (documents, collaborators)
-│   │   ├── middleware/        # JWT auth middleware
-│   │   ├── models/           # Mongoose schema
-│   │   ├── logger.ts         # Pino structured logger
-│   │   ├── metrics.ts        # Prometheus metrics
-│   │   ├── sentry.ts         # Sentry error tracking
-│   │   └── server.ts         # Express + WS entry point
-│   ├── tests/                # Vitest test suite
-│   ├── Dockerfile            # Multi-stage production build
+│   │   ├── relay/             # WebSocket relay server, room manager
+│   │   ├── persistence/       # MongoDB load/save for Y.Doc snapshots
+│   │   ├── routes/            # REST API: documents, invites, history
+│   │   ├── middleware/         # JWT auth middleware
+│   │   ├── models/            # Mongoose schemas (Document, Invite, DocumentHistory)
+│   │   ├── logger.ts          # Pino structured logger
+│   │   ├── metrics.ts         # Prometheus metrics
+│   │   ├── sentry.ts          # Sentry error tracking
+│   │   └── server.ts          # Express + WS entry point
+│   ├── tests/                 # Vitest test suite
+│   ├── Dockerfile             # Multi-stage production build
 │   ├── .env.example
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # Editor, Toolbar, PresenceBar, ConnectionStatus, DocumentList
-│   │   ├── hooks/            # useYjsDocument
-│   │   ├── lib/              # userColor utility
-│   │   ├── sentry.ts         # Frontend Sentry config
+│   │   ├── components/        # Editor, Chat, Comments, Share, Toolbar, etc.
+│   │   ├── hooks/             # useYjsDocument, useChat, useComments, useToast
+│   │   ├── lib/               # userColor utility
+│   │   ├── sentry.ts          # Frontend Sentry config
 │   │   ├── App.tsx
 │   │   └── main.tsx
-│   ├── Dockerfile            # Nginx production build
-│   ├── nginx.conf            # Reverse proxy config
+│   ├── Dockerfile             # Nginx production build
+│   ├── nginx.conf             # Reverse proxy config
 │   ├── .env.example
 │   └── package.json
 ├── docs/
-│   ├── architecture.md       # Detailed architecture documentation
-│   └── high-level-design.md  # High-level design document
+│   ├── architecture.md        # Detailed architecture documentation
+│   └── high-level-design.md   # High-level design document
 ├── .github/workflows/
-│   └── ci.yml                # CI pipeline
+│   └── ci.yml                 # CI pipeline
 ├── docker-compose.yml
 └── README.md
 ```
@@ -132,6 +150,10 @@ GitHub Actions runs on every push:
 | DELETE | `/api/documents/:id` | Owner | Delete document |
 | POST | `/api/documents/:id/collaborators` | Owner | Add collaborator |
 | DELETE | `/api/documents/:id/collaborators/:userId` | Owner | Remove collaborator |
+| GET | `/api/documents/:id/history` | Yes | List version history |
+| POST | `/api/documents/:id/restore` | Owner | Restore document to version |
+| POST | `/api/invites` | Owner | Create share invite link |
+| GET | `/api/invites/:code` | No | Resolve invite code to document |
 
 ## Metrics
 
@@ -174,6 +196,37 @@ For production:
 The server is a dumb relay — it never inspects document content. Yjs CRDT logic runs identically on every client, guaranteeing convergence regardless of message arrival order. The server only rebroadcasts binary updates and periodically persists Y.Doc snapshots to MongoDB.
 
 See [High-Level Design](docs/high-level-design.md) and [Architecture Details](docs/architecture.md) for comprehensive documentation.
+
+## Troubleshooting
+
+### WebSocket "Access denied to document" / Documents not found
+
+The most common issue is **two MongoDB instances** running simultaneously:
+- A **local MongoDB** installed as a Windows service (`C:\Program Files\MongoDB\Server\8.3\`)
+- A **Docker MongoDB** container (`collabrium-mongo`)
+
+When both run on port `27017`, the backend connects to one while documents may exist in the other. Symptoms:
+- API creates documents successfully, but they disappear from the document list
+- WebSocket connections fail with "Access denied to document"
+- Yjs sync errors ("Unexpected end of array", "contentRefs")
+
+**Fix:** Stop one MongoDB instance.
+
+```powershell
+# Option A: Stop local MongoDB (admin PowerShell)
+Stop-Service MongoDB
+
+# Option B: Stop Docker MongoDB
+docker stop collabrium-mongo
+```
+
+Then restart the backend.
+
+### Browser IndexedDB corruption
+
+If you previously connected with a corrupted Yjs state, the browser caches it in IndexedDB. New sessions reload the stale data, re-infecting the document.
+
+**Fix:** Use private/incognito windows for testing, or clear IndexedDB via DevTools → Application → IndexedDB → Delete database.
 
 ## License
 

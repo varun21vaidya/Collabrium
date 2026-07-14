@@ -2,6 +2,7 @@ import mongoose, { Schema, Document as MongooseDocument, Model } from 'mongoose'
 
 export interface ICollabDocument extends MongooseDocument {
   title: string;
+  description: string;
   ownerId: string;
   collaboratorIds: string[];
   yjsState: Buffer;
@@ -14,6 +15,7 @@ export interface ICollabDocument extends MongooseDocument {
 const DocumentSchema = new Schema(
   {
     title: { type: String, default: 'Untitled document', trim: true },
+    description: { type: String, default: '', trim: true, maxlength: 500 },
     ownerId: { type: String, required: true, index: true },
     collaboratorIds: { type: [String], default: [], index: true },
     yjsState: { type: Buffer },
@@ -26,6 +28,7 @@ const DocumentSchema = new Schema(
 DocumentSchema.index({ ownerId: 1, updatedAt: -1 });
 DocumentSchema.index({ collaboratorIds: 1, updatedAt: -1 });
 DocumentSchema.index({ lastEditedAt: -1 });
+DocumentSchema.index({ title: 'text' });
 
 const DocumentModel: Model<ICollabDocument> = mongoose.model<ICollabDocument>(
   'Document',
