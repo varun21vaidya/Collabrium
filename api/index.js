@@ -47,32 +47,39 @@ app.use((req, res, next) => {
   next();
 });
 
+// Disable Mongoose operation buffering globally
+mongoose.set('bufferCommands', false);
+
 // Serverless MongoDB connection cache
-let cachedDb = null;
+let dbPromise = null;
 
 async function dbConnect() {
-  if (cachedDb && mongoose.connection.readyState === 1) return cachedDb;
+  if (dbPromise) return dbPromise;
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/collab-editor';
   logger.info({ uri: uri.replace(/\/\/.*@/, '//***@') }, 'Connecting to MongoDB');
-  await mongoose.connect(uri, {
-    bufferTimeoutMS: 0,
+  dbPromise = mongoose.connect(uri, {
     maxPoolSize: 10,
     minPoolSize: 2,
     connectTimeoutMS: 30000,
     socketTimeoutMS: 60000,
     serverSelectionTimeoutMS: 15000,
   });
-  cachedDb = mongoose.connection;
-  logger.info('MongoDB connected');
-  return cachedDb;
+  try {
+    await dbPromise;
+    logger.info('MongoDB connected');
+  } catch (err) {
+    dbPromise = null;
+    logger.error({ error: err.message }, 'MongoDB connection failed');
+    throw err;
+  }
 }
 
 // Middleware: ensure DB connected before every request
 app.use(async (_req, _res, next) => {
   try {
     await dbConnect();
-  } catch (err) {
-    logger.error({ error: err.message }, 'MongoDB connection failed');
+  } catch {
+    // connection failed — routes will fail fast (bufferCommands: false)
   }
   next();
 });
