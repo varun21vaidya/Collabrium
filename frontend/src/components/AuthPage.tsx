@@ -175,7 +175,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
             </button>
           </form>
 
-          {import.meta.env.DEV && (
+          {import.meta.env.VITE_ENABLE_DEMO !== 'false' && (
             <>
               <div className="flex items-center gap-2">
                 <hr className="flex-1 border-white/10" />
