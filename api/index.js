@@ -47,12 +47,9 @@ app.use((req, res, next) => {
   next();
 });
 
-let mongoConnected = false;
-let mongoConnecting = false;
+let mongoPromise = null;
 
 async function connectMongo() {
-  if (mongoConnected || mongoConnecting) return;
-  mongoConnecting = true;
   try {
     const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/collab-editor';
     await mongoose.connect(uri, {
@@ -62,18 +59,22 @@ async function connectMongo() {
       connectTimeoutMS: 10_000,
       socketTimeoutMS: 30_000,
     });
-    mongoConnected = true;
     logger.info('MongoDB connected');
   } catch (err) {
     logger.error({ error: err.message }, 'MongoDB connection failed');
-  } finally {
-    mongoConnecting = false;
+    throw err;
   }
 }
 
+mongoPromise = connectMongo();
+
 app.use(async (_req, _res, next) => {
-  if (!mongoConnected && !mongoConnecting) {
-    await connectMongo();
+  if (mongoPromise) {
+    try {
+      await mongoPromise;
+    } catch {
+      // connection failed, continue anyway — routes will fail gracefully
+    }
   }
   next();
 });
@@ -96,7 +97,7 @@ app.get('/health/ws', (_req, res) => {
 });
 
 app.get('/health/ready', async (_req, res) => {
-  const mongoState = mongoConnected ? 'ok' : 'pending';
+  const mongoState = mongoose.connection.readyState === 1 ? 'ok' : 'pending';
   res.json({ status: mongoState === 'ok' ? 'ok' : 'degraded', mongo: mongoState });
 });
 
@@ -108,7 +109,5 @@ app.use('/api/documents', historyRouter);
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
-
-connectMongo();
 
 export default app;
