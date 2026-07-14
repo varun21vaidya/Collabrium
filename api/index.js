@@ -12,6 +12,7 @@ import { register, httpRequestsTotal } from '../backend/dist/metrics.js';
 import { getActiveDocCount, getTotalConnections } from '../backend/dist/relay/wsRelayServer.js';
 
 const app = express();
+app.set('trust proxy', 1);
 
 const frontendUrl = process.env.FRONTEND_URL || '';
 
