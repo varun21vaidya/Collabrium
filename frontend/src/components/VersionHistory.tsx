@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '../lib/config';
 
 interface Version {
   _id: string;
@@ -14,7 +15,6 @@ interface Props {
   addToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
 export const VersionHistory: React.FC<Props> = ({ documentId, token, onClose, addToast }) => {
   const [versions, setVersions] = useState<Version[]>([]);
@@ -22,7 +22,7 @@ export const VersionHistory: React.FC<Props> = ({ documentId, token, onClose, ad
   const [restoring, setRestoring] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${apiUrl}/api/documents/${documentId}/history`, {
+    fetch(`${API_URL}/api/documents/${documentId}/history`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -34,7 +34,7 @@ export const VersionHistory: React.FC<Props> = ({ documentId, token, onClose, ad
   const handleRestore = async (versionId: string) => {
     setRestoring(versionId);
     try {
-      const res = await fetch(`${apiUrl}/api/documents/${documentId}/restore`, {
+      const res = await fetch(`${API_URL}/api/documents/${documentId}/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ versionId }),

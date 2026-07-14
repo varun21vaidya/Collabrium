@@ -6,8 +6,7 @@ import DocumentList from './components/DocumentList';
 import AuthPage from './components/AuthPage';
 import { ToastContainer } from './components/Toast';
 import { useToast } from './hooks/useToast';
-
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+import { API_URL } from './lib/config';
 
 interface AuthState {
   userId: string;
@@ -117,7 +116,7 @@ const JoinPage: React.FC = () => {
 
   useEffect(() => {
     if (!inviteToken) return;
-    fetch(`${apiUrl}/api/invite/${inviteToken}`)
+    fetch(`${API_URL}/api/invite/${inviteToken}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) addToast(d.error, 'error');
@@ -134,7 +133,7 @@ const JoinPage: React.FC = () => {
     try {
       const userId = storedAuth?.userId || 'guest-' + Date.now();
       const name = storedAuth?.name || displayName || 'Guest';
-      const res = await fetch(`${apiUrl}/api/invite/${inviteToken}/accept`, {
+      const res = await fetch(`${API_URL}/api/invite/${inviteToken}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, name }),

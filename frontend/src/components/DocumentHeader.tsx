@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as Y from 'yjs';
+import { API_URL } from '../lib/config';
 
 interface Props {
   ydoc: Y.Doc;
@@ -12,7 +13,6 @@ interface Props {
   onHistory: () => void;
 }
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
 export const DocumentHeader: React.FC<Props> = ({
   ydoc, documentId, token, initialTitle, initialDescription = '', addToast, onShare, onHistory
@@ -50,7 +50,7 @@ export const DocumentHeader: React.FC<Props> = ({
     setEditingTitle(false);
     metadata.set('title', trimmed);
     try {
-      await fetch(`${apiUrl}/api/documents/${documentId}`, {
+      await fetch(`${API_URL}/api/documents/${documentId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ title: trimmed }),
@@ -65,7 +65,7 @@ export const DocumentHeader: React.FC<Props> = ({
     setEditingDesc(false);
     metadata.set('description', value);
     try {
-      await fetch(`${apiUrl}/api/documents/${documentId}`, {
+      await fetch(`${API_URL}/api/documents/${documentId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ description: value }),

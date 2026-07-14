@@ -1,0 +1,19 @@
+{
+  "installCommand": "cd frontend && npm install && cd ../backend && npm install",
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    },
+    {
+      "src": "api/index.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "api/index.ts" }
+  ]
+}

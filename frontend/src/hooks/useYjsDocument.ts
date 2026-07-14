@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
+import { WS_URL } from '../lib/config';
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'syncing';
 
@@ -18,11 +19,9 @@ export function useYjsDocument(
 ) {
   const ydoc = useMemo(() => new Y.Doc(), [documentId]);
 
-  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3002';
-
   const provider = useMemo(
     () =>
-      new WebsocketProvider(wsUrl, documentId, ydoc, {
+      new WebsocketProvider(WS_URL, documentId, ydoc, {
         connect: false,
         params: { doc: documentId, token },
         resyncInterval: 30000,
@@ -76,7 +75,7 @@ export function useYjsDocument(
       provider.disconnect();
       localProvider.destroy();
     };
-  }, [documentId, token, ydoc, userName, userColor, wsUrl, provider]);
+  }, [documentId, token, ydoc, userName, userColor, provider]);
 
   return { ydoc, provider, status };
 }

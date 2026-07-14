@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '../lib/config';
 
 interface DocumentRecord {
   _id: string;
@@ -16,7 +17,6 @@ interface DocumentListProps {
   addToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
 const SORT_OPTIONS = [
   { value: 'updatedAt', label: 'Last edited' },
@@ -46,7 +46,7 @@ const DocumentList: React.FC<DocumentListProps> = ({ token, onSelect, userId, ad
     try {
       const params = new URLSearchParams({ sortBy: s });
       if (q) params.set('search', q);
-      const res = await fetch(`${apiUrl}/api/documents?${params}`, {
+      const res = await fetch(`${API_URL}/api/documents?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch documents');
@@ -75,7 +75,7 @@ const DocumentList: React.FC<DocumentListProps> = ({ token, onSelect, userId, ad
     e.preventDefault();
     setCreating(true);
     try {
-      const res = await fetch(`${apiUrl}/api/documents`, {
+      const res = await fetch(`${API_URL}/api/documents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ title: newTitle || undefined }),
@@ -98,7 +98,7 @@ const DocumentList: React.FC<DocumentListProps> = ({ token, onSelect, userId, ad
     if (!confirm('Delete this document? This cannot be undone.')) return;
     setDeletingId(id);
     try {
-      const res = await fetch(`${apiUrl}/api/documents/${id}`, {
+      const res = await fetch(`${API_URL}/api/documents/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });

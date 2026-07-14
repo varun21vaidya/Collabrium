@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_URL } from '../lib/config';
 
 interface Props {
   documentId: string;
@@ -7,7 +8,6 @@ interface Props {
   addToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
 export const ShareModal: React.FC<Props> = ({ documentId, token, onClose, addToast }) => {
   const [permissions, setPermissions] = useState<'view' | 'edit'>('edit');
@@ -18,7 +18,7 @@ export const ShareModal: React.FC<Props> = ({ documentId, token, onClose, addToa
   const generateLink = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/api/documents/${documentId}/invite`, {
+      const res = await fetch(`${API_URL}/api/documents/${documentId}/invite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({

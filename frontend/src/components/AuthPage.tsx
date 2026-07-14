@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
+import { API_URL } from '../lib/config';
 
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+const DEMO_USERS = [
+  { id: 'user-alice', name: 'Alice Johnson', emoji: '👩‍💻' },
+  { id: 'user-bob', name: 'Bob Smith', emoji: '👨‍🎨' },
+  { id: 'user-carol', name: 'Carol Davis', emoji: '👩‍🔬' },
+  { id: 'user-dave', name: 'Dave Wilson', emoji: '👨‍🚀' },
+];
 
 interface AuthPageProps {
   onAuth: (auth: { token: string; userId: string; name: string }) => void;
@@ -14,6 +20,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [selectedDemo, setSelectedDemo] = useState(DEMO_USERS[0]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +33,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
         body.username = username;
         body.displayName = displayName;
       }
-      const res = await fetch(`${apiUrl}/api/auth${endpoint}`, {
+      const res = await fetch(`${API_URL}/api/auth${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -47,12 +54,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
     setError('');
     setLoading(true);
     try {
-      const demoId = 'demo-' + Date.now();
-      const demoName = 'Demo User';
-      const res = await fetch(`${apiUrl}/api/auth/demo-token`, {
+      const res = await fetch(`${API_URL}/api/auth/demo-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: demoId, name: demoName }),
+        body: JSON.stringify({ userId: selectedDemo.id, name: selectedDemo.name }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Demo mode failed');
@@ -177,12 +182,38 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuth }) => {
                 <span className="text-xs text-slate-500">or</span>
                 <hr className="flex-1 border-white/10" />
               </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-300 mb-3">Quick demo login</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {DEMO_USERS.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => setSelectedDemo(user)}
+                      className={`p-3 rounded-xl border transition-all text-left ${
+                        selectedDemo.id === user.id
+                          ? 'border-violet-500/60 bg-violet-500/15'
+                          : 'border-white/5 hover:border-white/20 hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="text-xl mb-1">{user.emoji}</div>
+                      <div className="text-xs font-semibold text-slate-200 leading-tight">{user.name}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{user.id}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={handleDemo}
-                className="w-full py-2.5 border border-white/10 hover:border-white/20 text-slate-300 font-medium rounded-xl transition-all text-sm"
+                disabled={loading}
+                className="w-full py-3 bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm shadow-lg"
               >
-                Try without signing up (Demo)
+                {loading ? (
+                  <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Connecting...</>
+                ) : (
+                  <>Continue as {selectedDemo.name.split(' ')[0]} →</>
+                )}
               </button>
             </>
           )}
