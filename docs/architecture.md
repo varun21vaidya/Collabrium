@@ -11,14 +11,18 @@ collab-editor/
 │   │   ├── middleware/
 │   │   │   └── auth.ts               # JWT sign/verify, authMiddleware, verifyWsToken
 │   │   ├── models/
-│   │   │   └── Document.ts           # Mongoose schema for documents
+│   │   │   ├── Document.ts           # Mongoose schema for documents
+│   │   │   ├── DocumentHistory.ts    # Version history snapshots
+│   │   │   └── Invite.ts             # Share invite links
 │   │   ├── persistence/
 │   │   │   └── mongoPersistence.ts   # loadDocument / persistDocument
 │   │   ├── relay/
 │   │   │   ├── roomManager.ts        # Room membership tracking
 │   │   │   └── wsRelayServer.ts      # CRDT relay: getOrCreateDoc, schedulePersist, GC
 │   │   └── routes/
-│   │       └── documents.ts          # REST: list (paginated), create, delete
+│   │       ├── documents.ts          # REST: list (paginated), create, delete
+│   │       ├── invites.ts            # Share invite creation/resolution
+│   │       └── history.ts            # Version history list/restore
 │   └── tests/
 │       └── roomManager.test.ts       # Vitest unit tests
 │
@@ -31,10 +35,19 @@ collab-editor/
 │   │   │   ├── ErrorBoundary.tsx     # React error boundary wrapper
 │   │   │   ├── PresenceBar.tsx       # Online user avatars
 │   │   │   ├── ConnectionStatus.tsx  # Connection indicator
-│   │   │   └── DocumentList.tsx      # Document CRUD list
+│   │   │   ├── DocumentList.tsx      # Document CRUD list
+│   │   │   ├── DocumentHeader.tsx    # Title/description editor
+│   │   │   ├── Toolbar.tsx           # Rich-text formatting toolbar
+│   │   │   ├── ChatPanel.tsx         # Team chat sidebar
+│   │   │   ├── CommentsSidebar.tsx   # Inline comments sidebar
+│   │   │   ├── ShareModal.tsx        # Share/invite dialog
+│   │   │   ├── VersionHistory.tsx    # Version history browser
+│   │   │   └── Toast.tsx             # Toast notification component
 │   │   ├── hooks/
 │   │   │   ├── useYjsDocument.ts     # Y.Doc + WebsocketProvider + IndexedDB
-│   │   │   └── useConnectionStatus.ts # Standalone WS status hook
+│   │   │   ├── useChat.ts            # Yjs-based chat messages
+│   │   │   ├── useComments.ts        # Yjs-based inline comments
+│   │   │   └── useToast.ts           # Toast notification state
 │   │   └── lib/
 │   │       └── userColor.ts          # Deterministic color from user ID
 │   ├── index.html
@@ -141,8 +154,22 @@ Indexes: `ownerId+updatedAt`, `collaboratorIds+updatedAt`, `lastEditedAt`
 ### documents.ts (REST Routes)
 
 - `GET /` — Paginated list (50/page), filtered by ownerId/collaboratorIds
+- `GET /:id` — Get document metadata (with ACL check)
 - `POST /` — Create document, validate title (max 200 chars)
+- `PATCH /:id` — Update title/description (with ACL check)
 - `DELETE /:id` — Delete own document, validate ObjectId
+- `POST /:id/collaborators` — Add collaborator (owner only)
+- `DELETE /:id/collaborators/:userId` — Remove collaborator (owner only)
+
+### invites.ts
+
+- `POST /` — Create share invite link for a document (owner only)
+- `GET /:code` — Resolve invite code, return document info + JWT token
+
+### history.ts
+
+- `GET /:id/history` — List version history (latest 50, ACL-checked)
+- `POST /:id/restore` — Restore document to a previous version (ACL-checked)
 
 ---
 
@@ -187,18 +214,59 @@ Visual indicator with 4 states:
 
 **Creates:**
 1. `Y.Doc` instance (memoized per documentId)
-2. `WebsocketProvider` — connects to relay at `/collab?doc=&token=`
-3. `IndexeddbPersistence` — local offline cache
+2. `WebsocketProvider` — connects to relay at `ws://host:port/:docId?doc=&token=`
+3. `IndexeddbPersistence` — local offline cache (created inside useEffect for StrictMode safety)
 
 **Lifecycle:**
 - Sets awareness user state (name, color)
 - Listens for status/sync events on provider
 - Handles offline/online browser events
-- Cleanup: destroy provider, destroy IndexedDB persistence, clear awareness
+- Cleanup: disconnect provider (not destroy — preserves Y.Doc listeners), destroy IndexedDB persistence, clear awareness
 
-### useConnectionStatus.ts
+**StrictMode safety:**
+- Provider created via `useMemo` with `connect: false`
+- `provider.connect()` called inside effect
+- Cleanup calls `provider.disconnect()` instead of `provider.destroy()`
+- On re-mount (StrictMode double-invoke), existing provider reconnects cleanly without losing Y.Doc update listeners
 
-Standalone hook for monitoring WebSocket connection state externally.
+### useChat.ts
+
+Yjs-based team chat stored as a shared Y.Array on the Y.Doc. Messages are CRDT-backed — no separate database.
+
+```typescript
+// Messages stored as Y.Map objects in a Y.Array named "chat"
+{
+  id: string
+  userId: string
+  userName: string
+  color: string
+  text: string
+  timestamp: number
+}
+```
+
+### useComments.ts
+
+Yjs-based inline comments stored as a shared Y.Array. Supports replies and resolution.
+
+```typescript
+// Comments stored as Y.Map objects in a Y.Array named "comments"
+{
+  id: string
+  userId: string
+  userName: string
+  color: string
+  text: string
+  selectedText: string  // The highlighted text this comment refers to
+  resolved: boolean
+  replies: Array<{ userId, userName, color, text, timestamp }>
+  timestamp: number
+}
+```
+
+### useToast.ts
+
+Simple toast notification state hook. Manages a queue of toast messages with auto-dismiss.
 
 ### userColor.ts
 
@@ -211,8 +279,10 @@ Deterministic color assignment from user ID via hash function. 8-color palette.
 ### WebSocket Connection
 
 ```
-ws://host:3002/collab?doc=<mongo-object-id>&token=<jwt>
+ws://host:3002/<room-name>?doc=<mongo-object-id>&token=<jwt>
 ```
+
+The room name is the document ID (set by y-websocket). The `doc` query param is what the server uses for access control.
 
 ### Binary Message Format
 
@@ -286,7 +356,7 @@ process.exit(0)
 │  (Client)    │
 └──────┬───────┘
        │
-       │ WebSocket upgrade: /collab?doc=X&token=JWT
+        │ WebSocket upgrade: /:roomName?doc=X&token=JWT
        │ HTTP: Authorization: Bearer JWT
        ▼
 ┌──────────────┐
@@ -338,3 +408,6 @@ process.exit(0)
 - [x] WebSocket health endpoint /health/ws (L4)
 - [x] Docker HEALTHCHECK (L5)
 - [x] Automated test suite (L6)
+- [x] React StrictMode-safe Yjs provider lifecycle (cleanup uses disconnect not destroy)
+- [x] Corrupt persisted state handling (graceful fallback to empty Y.Doc)
+- [x] ACL error logging with doc-level debug info

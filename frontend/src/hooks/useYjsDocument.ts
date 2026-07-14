@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
@@ -18,28 +18,25 @@ export function useYjsDocument(
 ) {
   const ydoc = useMemo(() => new Y.Doc(), [documentId]);
 
-  const wsUrl = `${import.meta.env.VITE_WS_URL || 'ws://localhost:3002'}/collab?doc=${documentId}&token=${encodeURIComponent(token)}`;
+  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3002';
 
   const provider = useMemo(
     () =>
       new WebsocketProvider(wsUrl, documentId, ydoc, {
-        connect: true,
+        connect: false,
+        params: { doc: documentId, token },
         resyncInterval: 30000,
         maxBackoffTime: 2500,
       }),
-    [documentId, token, ydoc, wsUrl]
-  );
-
-  const localProvider = useMemo(
-    () => new IndexeddbPersistence(documentId, ydoc),
-    [documentId, ydoc]
+    [documentId, token, ydoc]
   );
 
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
-  const mountedRef = useRef(true);
 
   useEffect(() => {
-    mountedRef.current = true;
+    const localProvider = new IndexeddbPersistence(documentId, ydoc);
+
+    provider.connect();
 
     provider.awareness.setLocalStateField('user', {
       name: userName,
@@ -47,7 +44,6 @@ export function useYjsDocument(
     });
 
     const handleStatus = (event: { status: string }) => {
-      if (!mountedRef.current) return;
       if (event.status === 'connected') {
         setStatus('connected');
       } else if (event.status === 'connecting') {
@@ -57,20 +53,14 @@ export function useYjsDocument(
       }
     };
 
-    const handleSynced = (event: { synced: boolean }) => {
-      if (!mountedRef.current) return;
-      if (event.synced) {
+    const handleSynced = (isSynced: boolean) => {
+      if (isSynced) {
         setStatus(provider.wsconnected ? 'connected' : 'syncing');
       }
     };
 
-    const handleOffline = () => {
-      if (mountedRef.current) setStatus('disconnected');
-    };
-
-    const handleOnline = () => {
-      if (mountedRef.current) setStatus('connecting');
-    };
+    const handleOffline = () => setStatus('disconnected');
+    const handleOnline = () => setStatus('connecting');
 
     provider.on('status', handleStatus);
     provider.on('sync', handleSynced);
@@ -78,16 +68,15 @@ export function useYjsDocument(
     window.addEventListener('online', handleOnline);
 
     return () => {
-      mountedRef.current = false;
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('online', handleOnline);
       provider.off('status', handleStatus);
       provider.off('sync', handleSynced);
       provider.awareness.setLocalStateField('user', null);
-      provider.destroy();
+      provider.disconnect();
       localProvider.destroy();
     };
-  }, [provider, localProvider, userName, userColor]);
+  }, [documentId, token, ydoc, userName, userColor, wsUrl, provider]);
 
-  return { ydoc, provider, localProvider, status };
+  return { ydoc, provider, status };
 }

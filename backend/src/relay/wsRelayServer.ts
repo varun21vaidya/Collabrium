@@ -24,9 +24,9 @@ async function getOrCreateDoc(documentId: string): Promise<Y.Doc> {
         if (savedState) {
           try {
             Y.applyUpdate(doc, savedState);
-            logger.info('Loaded Y.Doc from persistence', { documentId, bytes: savedState.byteLength });
+            logger.info({ documentId, bytes: savedState.byteLength }, 'Loaded Y.Doc from persistence');
           } catch (err) {
-            logger.error('Failed to apply persisted state', { documentId, error: (err as Error).message });
+            logger.error({ documentId, error: (err as Error).message }, 'Failed to apply persisted state');
           }
         }
         activeDocs.set(documentId, doc);
@@ -69,7 +69,7 @@ async function persistWithRetry(documentId: string, state: Uint8Array, maxRetrie
         throw err;
       }
       const delay = 1000 * 2 ** (attempt - 1);
-      logger.warn('Persistence retry', { documentId, attempt, delay, error: (err as Error).message });
+      logger.warn({ documentId, attempt, delay, error: (err as Error).message }, 'Persistence retry');
       await new Promise(r => setTimeout(r, delay));
     }
   }
@@ -82,9 +82,9 @@ function schedulePersist(documentId: string, ydoc: Y.Doc): void {
     try {
       const state = Y.encodeStateAsUpdate(ydoc);
       await persistWithRetry(documentId, state);
-      logger.info('Persisted Y.Doc snapshot', { documentId, bytes: state.byteLength });
+      logger.info({ documentId, bytes: state.byteLength }, 'Persisted Y.Doc snapshot');
     } catch (err) {
-      logger.error('Persistence failed after retries', { documentId, error: (err as Error).message });
+      logger.error({ documentId, error: (err as Error).message }, 'Persistence failed after retries');
     } finally {
       persistTimers.delete(documentId);
     }
@@ -97,9 +97,9 @@ export async function flushAllDocuments(): Promise<void> {
     try {
       const state = Y.encodeStateAsUpdate(ydoc);
       await persistDocument(docId, state);
-      logger.info('Flushed document on shutdown', { docId });
+      logger.info({ docId }, 'Flushed document on shutdown');
     } catch (err) {
-      logger.error('Flush failed on shutdown', { docId, error: (err as Error).message });
+      logger.error({ docId, error: (err as Error).message }, 'Flush failed on shutdown');
     }
   });
   await Promise.allSettled(promises);
@@ -113,10 +113,10 @@ const gcTimer = setInterval(() => {
     try {
       const stateSize = Y.encodeStateAsUpdate(ydoc).byteLength;
       if (stateSize > 5 * 1024 * 1024) {
-        logger.warn('Large Y.Doc detected', { docId, bytes: stateSize });
+        logger.warn({ docId, bytes: stateSize }, 'Large Y.Doc detected');
       }
     } catch (err) {
-      logger.error('GC check failed', { docId, error: (err as Error).message });
+      logger.error({ docId, error: (err as Error).message }, 'GC check failed');
     }
   }
 }, GC_INTERVAL_MS);
@@ -139,7 +139,7 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
 
   const heartbeatInterval = setInterval(() => {
     if (!isAlive) {
-      logger.warn('Terminating dead socket', { documentId, userId });
+      logger.warn({ documentId, userId }, 'Terminating dead socket');
       ws.terminate();
       return;
     }
@@ -147,7 +147,7 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
     try {
       ws.ping();
     } catch (err) {
-      logger.warn('Ping failed', { documentId, userId, error: (err as Error).message });
+      logger.warn({ documentId, userId, error: (err as Error).message }, 'Ping failed');
     }
   }, 30000);
 
@@ -156,7 +156,7 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
   });
 
   if (roomManager.getRoomSize(documentId) >= MAX_CONNECTIONS_PER_DOC) {
-    logger.warn('Room full, rejecting connection', { documentId, userId, currentSize: roomManager.getRoomSize(documentId) });
+    logger.warn({ documentId, userId, currentSize: roomManager.getRoomSize(documentId) }, 'Room full, rejecting connection');
     ws.close(1013, 'Room full');
     return;
   }
@@ -172,17 +172,17 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
       wsConnectionsActive.set(roomManager.getRoomSize(documentId));
       activeDocumentsGauge.set(activeDocs.size);
 
-      logger.info('Client joined document', {
+      logger.info({
         documentId,
         userId,
         roomSize: roomManager.getRoomSize(documentId),
-      });
+      }, 'Client joined document');
     } catch (err) {
-      logger.error('Failed to initialize relay connection', {
+      logger.error({
         documentId,
         userId,
         error: (err as Error).message,
-      });
+      }, 'Failed to initialize relay connection');
       ws.close();
     }
   })();
@@ -191,7 +191,7 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
     if (!ydoc) return;
 
     if (raw.length > MAX_MESSAGE_SIZE) {
-      logger.warn('Message too large, closing connection', { documentId, userId, size: raw.length });
+      logger.warn({ documentId, userId, size: raw.length }, 'Message too large, closing connection');
       ws.close(1009, 'Message too large');
       return;
     }
@@ -206,14 +206,14 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
       } else if (type === MESSAGE_AWARENESS) {
         roomManager.broadcast(documentId, ws, raw);
       } else {
-        logger.warn('Unknown message type', { documentId, userId, type });
+        logger.warn({ documentId, userId, type }, 'Unknown message type');
       }
     } catch (err) {
-      logger.error('Message processing error', {
+      logger.error({
         documentId,
         userId,
         error: (err as Error).message,
-      });
+      }, 'Message processing error');
     }
   });
 
@@ -226,18 +226,18 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
 
       wsConnectionsActive.set(remaining);
 
-      logger.info('Client left document', { documentId, userId, remaining });
+      logger.info({ documentId, userId, remaining }, 'Client left document');
 
       if (remaining === 0) {
         try {
           const state = Y.encodeStateAsUpdate(ydoc);
           await persistDocument(documentId, state);
-          logger.info('Final flush on empty room', { documentId, bytes: state.byteLength });
+          logger.info({ documentId, bytes: state.byteLength }, 'Final flush on empty room');
         } catch (err) {
-          logger.error('Final persistence failed', {
+          logger.error({
             documentId,
             error: (err as Error).message,
-          });
+          }, 'Final persistence failed');
         }
 
         const timer = persistTimers.get(documentId);
@@ -249,12 +249,12 @@ export function handleRelayConnection(ws: WebSocket, documentId: string, userId:
         ydoc.destroy();
         activeDocs.delete(documentId);
         activeDocumentsGauge.set(activeDocs.size);
-        logger.info('Purged Y.Doc from memory', { documentId });
+        logger.info({ documentId }, 'Purged Y.Doc from memory');
       }
     }
   });
 
   ws.on('error', (err) => {
-    logger.error('WebSocket error', { documentId, userId, error: err.message });
+    logger.error({ documentId, userId, error: err.message }, 'WebSocket error');
   });
 }
