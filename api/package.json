@@ -1,5 +1,5 @@
 {
-  "name": "collabrium",
+  "name": "collabrium-api",
   "private": true,
   "type": "module",
   "dependencies": {
