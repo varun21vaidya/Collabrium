@@ -1,17 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import * as Sentry from '@sentry/react';
 import Editor from './components/Editor';
 import DocumentList from './components/DocumentList';
+import AuthPage from './components/AuthPage';
 import { ToastContainer } from './components/Toast';
 import { useToast } from './hooks/useToast';
-
-const DEMO_USERS = [
-  { id: 'user-alice', name: 'Alice Johnson', emoji: '👩‍💻' },
-  { id: 'user-bob', name: 'Bob Smith', emoji: '👨‍🎨' },
-  { id: 'user-carol', name: 'Carol Davis', emoji: '👩‍🔬' },
-  { id: 'user-dave', name: 'Dave Wilson', emoji: '👨‍🚀' },
-];
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3002';
 
@@ -30,101 +24,6 @@ interface EditSession {
   description?: string;
 }
 
-// ── Login Page ────────────────────────────────────────────────────────────────
-const LoginPage: React.FC<{ onAuth: (auth: AuthState) => void }> = ({ onAuth }) => {
-  const [selected, setSelected] = useState(DEMO_USERS[0]);
-  const [loading, setLoading] = useState(false);
-  const { addToast, toasts, removeToast } = useToast();
-
-  const handleLogin = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${apiUrl}/api/auth/demo-token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: selected.id, name: selected.name }),
-      });
-      if (!res.ok) throw new Error('Failed to connect');
-      const { token } = await res.json();
-      onAuth({ userId: selected.id, name: selected.name, token });
-    } catch {
-      addToast('Failed to connect. Is the backend running?', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: 'radial-gradient(ellipse at 20% 50%, rgba(139,92,246,0.15) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(96,165,250,0.1) 0%, transparent 50%), rgb(9,9,18)' }}>
-      {/* Decorative orbs */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full" style={{ background: 'rgba(139,92,246,0.06)', filter: 'blur(80px)', pointerEvents: 'none' }} />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full" style={{ background: 'rgba(96,165,250,0.06)', filter: 'blur(80px)', pointerEvents: 'none' }} />
-
-      <div className="relative w-full max-w-md animate-fadeInUp">
-        {/* Logo/Title */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.3), rgba(96,165,250,0.2))', border: '1px solid rgba(139,92,246,0.4)' }}>
-            <svg className="w-8 h-8 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
-          </div>
-          <h1 className="text-4xl font-extrabold gradient-text">Collabrium</h1>
-          <p className="text-slate-400 mt-2 text-sm">Real-time collaborative editing, powered by CRDTs</p>
-        </div>
-
-        {/* Card */}
-        <div className="glass-strong rounded-2xl p-6 space-y-6 gradient-border">
-          <div>
-            <label className="block text-sm font-semibold text-slate-300 mb-3">Choose your identity</label>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO_USERS.map((user) => (
-                <button
-                  key={user.id}
-                  type="button"
-                  onClick={() => setSelected(user)}
-                  className={`p-4 rounded-xl border transition-all text-left ${
-                    selected.id === user.id
-                      ? 'border-violet-500/60 bg-violet-500/15'
-                      : 'border-white/5 hover:border-white/20 hover:bg-white/5'
-                  }`}
-                >
-                  <div className="text-2xl mb-2">{user.emoji}</div>
-                  <div className="text-sm font-semibold text-slate-200 leading-tight">{user.name}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">{user.id}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleLogin}
-            disabled={loading}
-            id="login-btn"
-            className="w-full py-3 bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm shadow-lg animate-pulse-glow"
-          >
-            {loading ? (
-              <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Connecting...</>
-            ) : (
-              <>Continue as {selected.name.split(' ')[0]} →</>
-            )}
-          </button>
-
-          <div className="glass rounded-xl p-4">
-            <p className="text-xs font-semibold text-slate-400 mb-2">💡 Quick start</p>
-            <ul className="text-xs text-slate-500 space-y-1">
-              <li>→ Open this page in <span className="text-violet-400">multiple tabs</span></li>
-              <li>→ Pick different users in each tab</li>
-              <li>→ Create a document and start collaborating</li>
-              <li>→ Share via link for external access</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      <ToastContainer toasts={toasts} removeToast={removeToast} />
-    </div>
-  );
-};
 
 // ── Docs Page ─────────────────────────────────────────────────────────────────
 const DocsPage: React.FC<{ auth: AuthState; onLogout: () => void; onSelect: (session: EditSession) => void }> = ({ auth, onLogout, onSelect }) => {
@@ -207,12 +106,16 @@ const JoinPage: React.FC = () => {
   const { token: inviteToken } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const { addToast, toasts, removeToast } = useToast();
-  const [info, setInfo] = React.useState<{ documentId: string; documentTitle: string; permissions: string } | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [accepting, setAccepting] = React.useState(false);
-  const [selected, setSelected] = React.useState(DEMO_USERS[0]);
+  const [info, setInfo] = useState<{ documentId: string; documentTitle: string; permissions: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [accepting, setAccepting] = useState(false);
+  const [displayName, setDisplayName] = useState('');
 
-  React.useEffect(() => {
+  const storedAuth = (() => {
+    try { return JSON.parse(localStorage.getItem('collabrium_auth') || 'null'); } catch { return null; }
+  })() as { token: string; userId: string; name: string } | null;
+
+  useEffect(() => {
     if (!inviteToken) return;
     fetch(`${apiUrl}/api/invite/${inviteToken}`)
       .then((r) => r.json())
@@ -229,14 +132,15 @@ const JoinPage: React.FC = () => {
     if (!info || !inviteToken) return;
     setAccepting(true);
     try {
+      const userId = storedAuth?.userId || 'guest-' + Date.now();
+      const name = storedAuth?.name || displayName || 'Guest';
       const res = await fetch(`${apiUrl}/api/invite/${inviteToken}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: selected.id, name: selected.name }),
+        body: JSON.stringify({ userId, name }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      // Store auth and navigate to editor
       sessionStorage.setItem('collabrium_auth', JSON.stringify({ token: data.token, userId: data.userId, name: data.name }));
       sessionStorage.setItem('collabrium_doc', JSON.stringify({ documentId: data.documentId, title: info.documentTitle }));
       navigate('/', { state: { fromInvite: true, ...data, documentId: data.documentId, title: info.documentTitle } });
@@ -269,41 +173,35 @@ const JoinPage: React.FC = () => {
               <p className="text-slate-400 text-sm mt-1">
                 <span className="text-violet-300 font-semibold">{info.documentTitle}</span>
               </p>
-              <span className={`inline-block mt-2 px-2.5 py-0.5 text-xs font-semibold rounded-full ${
-                info.permissions === 'edit' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-blue-500/20 text-blue-300'
-              }`}>
+              <span className={`inline-block mt-2 px-2.5 py-0.5 text-xs font-semibold rounded-full ${info.permissions === 'edit' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-blue-500/20 text-blue-300'}`}>
                 {info.permissions === 'edit' ? '✏️ Can Edit' : '👁️ View Only'}
               </span>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-3">Join as</label>
-              <div className="grid grid-cols-2 gap-2">
-                {DEMO_USERS.map((user) => (
-                  <button
-                    key={user.id}
-                    type="button"
-                    onClick={() => setSelected(user)}
-                    className={`p-3 rounded-xl border transition-all text-left ${
-                      selected.id === user.id
-                        ? 'border-violet-500/60 bg-violet-500/15'
-                        : 'border-white/5 hover:border-white/20'
-                    }`}
-                  >
-                    <div className="text-2xl mb-1">{user.emoji}</div>
-                    <div className="text-xs font-semibold text-slate-200">{user.name}</div>
-                  </button>
-                ))}
+            {storedAuth ? (
+              <div className="text-center">
+                <p className="text-sm text-slate-300">Joining as <span className="text-violet-300 font-semibold">{storedAuth.name}</span></p>
               </div>
-            </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-semibold text-slate-300 mb-3">Your name</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Enter your name"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-colors"
+                />
+              </div>
+            )}
 
             <button
               type="button"
               onClick={handleAccept}
-              disabled={accepting}
+              disabled={accepting || (!storedAuth && !displayName)}
               className="w-full py-3 bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 text-white font-bold rounded-xl transition-all disabled:opacity-50 text-sm"
             >
-              {accepting ? 'Joining...' : `Join as ${selected.name.split(' ')[0]} →`}
+              {accepting ? 'Joining...' : `Join →`}
             </button>
           </div>
         )}
@@ -318,8 +216,21 @@ const AppInner: React.FC = () => {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [session, setSession] = useState<EditSession | null>(null);
 
+  // Restore persistent auth from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('collabrium_auth');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setAuth(parsed);
+      } catch {
+        localStorage.removeItem('collabrium_auth');
+      }
+    }
+  }, []);
+
   // Handle invite redirects stored in sessionStorage
-  React.useEffect(() => {
+  useEffect(() => {
     const storedAuth = sessionStorage.getItem('collabrium_auth');
     const storedDoc = sessionStorage.getItem('collabrium_doc');
     if (storedAuth && storedDoc) {
@@ -332,15 +243,25 @@ const AppInner: React.FC = () => {
     }
   }, []);
 
+  const handleAuth = (auth: AuthState) => {
+    setAuth(auth);
+    localStorage.setItem('collabrium_auth', JSON.stringify(auth));
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('collabrium_auth');
+    setAuth(null);
+  };
+
   if (session) {
     return <EditorPage session={session} onLeave={() => setSession(null)} />;
   }
 
   if (auth) {
-    return <DocsPage auth={auth} onLogout={() => setAuth(null)} onSelect={(s) => setSession(s)} />;
+    return <DocsPage auth={auth} onLogout={handleLogout} onSelect={(s) => setSession(s)} />;
   }
 
-  return <LoginPage onAuth={(a) => setAuth(a)} />;
+  return <AuthPage onAuth={handleAuth} />;
 };
 
 const App: React.FC = () => (

@@ -9,8 +9,9 @@ import { IncomingMessage } from 'http';
 import rateLimit from 'express-rate-limit';
 import pinoHttp from 'pino-http';
 import { handleRelayConnection, flushAllDocuments, getActiveDocCount, getTotalConnections } from './relay/wsRelayServer.js';
-import { verifyWsToken, signToken } from './middleware/auth.js';
+import { verifyWsToken } from './middleware/auth.js';
 import DocumentModel from './models/Document.js';
+import authRouter from './routes/auth.js';
 import documentsRouter from './routes/documents.js';
 import invitesRouter from './routes/invites.js';
 import historyRouter from './routes/history.js';
@@ -43,14 +44,6 @@ const apiLimiter = rateLimit({
   message: { error: 'Too many requests, please try again later' },
 });
 
-const tokenLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many token requests, please try again later' },
-});
-
 app.use('/api/', apiLimiter);
 
 app.use(pinoHttp({ logger }));
@@ -73,15 +66,7 @@ app.get('/metrics', async (_req: Request, res: Response) => {
   res.end(await register.metrics());
 });
 
-app.post('/api/auth/demo-token', tokenLimiter, (req: Request, res: Response) => {
-  const { userId, name } = req.body;
-  if (!userId || !name) {
-    res.status(400).json({ error: 'userId and name required' });
-    return;
-  }
-  const token = signToken({ sub: userId, name });
-  res.json({ token, userId, name });
-});
+app.use('/api/auth', authRouter);
 
 app.get('/health/ws', (_req: Request, res: Response) => {
   const mem = process.memoryUsage();
